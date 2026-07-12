@@ -1,0 +1,17 @@
+{
+  "schema_version": "sprint1-v0",
+  "attestation_id": "bcb7cb42-b17d-4752-a20a-c8197ff56429",
+  "session_id": "a500f9d1-ed84-462f-a35f-3f116e9494e9",
+  "timestamp": "2026-07-12T15:52:12.021000+00:00",
+  "developer_intent": "e",
+  "prompt": "e",
+  "agent_identity": {
+    "model": "e",
+    "provider": "e"
+  },
+  "ai_output_summary": "e",
+  "human_review_status": {
+    "reviewed": false,
+    "reviewer": null
+  }
+}

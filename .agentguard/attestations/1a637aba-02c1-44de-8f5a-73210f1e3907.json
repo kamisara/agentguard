@@ -1,0 +1,17 @@
+{
+  "schema_version": "sprint1-v0",
+  "attestation_id": "1a637aba-02c1-44de-8f5a-73210f1e3907",
+  "session_id": "d1f39d0d-ca74-4ab0-a2cc-9ecf32badf66",
+  "timestamp": "2026-07-12T15:20:09.775257+00:00",
+  "developer_intent": "Create a JWT authentication system.",
+  "prompt": "Create a JWT authentication system.",
+  "agent_identity": {
+    "model": "s",
+    "provider": "s"
+  },
+  "ai_output_summary": "s",
+  "human_review_status": {
+    "reviewed": false,
+    "reviewer": null
+  }
+}
