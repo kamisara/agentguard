@@ -17,6 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Union
 
+from .interfaces import BaseAdapter
 from .types import CaptureEvent
 
 # Git's well-known empty-tree hash. Used as the diff base for a repo's first
@@ -124,3 +125,42 @@ def capture_from_git(repo_path: Union[str, Path, None] = None) -> CaptureEvent:
             "diff_stat": diff_stat["raw"],
         },
     )
+
+
+class GitAdapter(BaseAdapter):
+    """BaseAdapter wrapper around capture_from_git().
+
+    Deliberately a thin wrapper, not a rewrite: capture_from_git() was
+    validated against real commits (first-commit empty-tree fallback,
+    multi-line commit bodies, normal parent-diff path) before this class
+    existed. That logic doesn't change just because it's now behind an
+    interface - only is_available() is genuinely new behavior.
+
+    priority = 100: git is the last-resort fallback. It only produces
+    INFERRED intent (see normalizer.EXPLICIT_INTENT_ADAPTERS), so any
+    adapter capturing an explicit prompt should be tried first.
+    """
+
+    priority = 100
+
+    def __init__(self, repo_path: Union[str, Path, None] = None):
+        self.repo_path = Path(repo_path) if repo_path else Path.cwd()
+
+    def is_available(self) -> bool:
+        """True if repo_path is inside a git repository with at least one
+        commit. Cheap check - just asks git, doesn't parse anything."""
+        try:
+            subprocess.run(
+                ["git", "rev-parse", "--verify", "HEAD"],
+                cwd=str(self.repo_path),
+                capture_output=True,
+                check=True,
+            )
+            return True
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            # CalledProcessError: no commits yet, or not a git repo
+            # FileNotFoundError: git itself isn't installed/on PATH
+            return False
+
+    def capture(self) -> CaptureEvent:
+        return capture_from_git(self.repo_path)
