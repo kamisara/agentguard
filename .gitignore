@@ -1,0 +1,7 @@
+# Cache and temporary output files
+__pycache__/
+*.pyc
+head.txt
+
+# AgentGuard local state/test attestations
+.agentguard/
