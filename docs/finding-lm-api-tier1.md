@@ -31,5 +31,3 @@ This is not an outbound proxy or a provider registration — it's Claude Code *c
 Build `ClaudeCodeHookAdapter` as the first real (non-git) capture adapter, `priority=5` — above `DebugAdapter` (still fake, scraping is unexplored) and well above `GitAdapter` (100), but not `0`, since `LmApiAdapter`'s narrowed scope (capturing your own extension/participant traffic) may still have a legitimate, if smaller, place in the priority chain later.
 
 **Section 4.2 impact:** the tier ordering needs updating to reflect Tier 2 as primary for closed agents. Draft this once the hook adapter is validated against realistic hook payloads.
-
-docs/finding-lm-api-tier1.md (or a new short note) that ClaudeCodeHookAdapter is validated against realistic simulated payloads but not yet against a live session, due to API cost — this is an honest, defensible statement for a proposal, not a weakness you need to hide. Move on to folding the adapters into agentguard.py's real CLI, and come back to the live test later if/when you have Console credits for other reasons (e.g. once you're doing real development work that needs Claude Code anyway).

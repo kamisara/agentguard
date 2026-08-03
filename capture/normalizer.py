@@ -17,7 +17,7 @@ from .types import CaptureEvent, NormalizedEvent, IntentSource
 # in later sprints. Deliberately explicit rather than "everything except
 # git" so adding a new adapter forces a conscious decision about which
 # bucket it belongs in.
-EXPLICIT_INTENT_ADAPTERS = {"lm_api", "debug", "lsp", "claude_code_hook"}
+EXPLICIT_INTENT_ADAPTERS = {"lm_api", "debug", "lsp", "claude_code_hook", "copilot_hook"}
 
 
 def _resolve_intent_source(adapter: str) -> IntentSource:
