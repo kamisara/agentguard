@@ -1,0 +1,25 @@
+{
+  "_comment": "Add this into .claude/settings.json (project) or ~/.claude/settings.json (user). Adjust the python path/command if you're using a venv.",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python /absolute/path/to/agentguard/capture/claude_code_hooks/hook_handler.py"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python /absolute/path/to/agentguard/capture/claude_code_hooks/hook_handler.py"
+          }
+        ]
+      }
+    ]
+  }
+}

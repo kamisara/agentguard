@@ -1,0 +1,10 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      { "hooks": [{ "type": "command", "command": "python D:/code pfe 2/agentguard/capture/claude_code_hooks/hook_handler.py" }] }
+    ],
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "python D:/code pfe 2/agentguard/capture/claude_code_hooks/hook_handler.py" }] }
+    ]
+  }
+}
