@@ -94,7 +94,7 @@ def main():
             "prompt": prompt_text,
         }
     )
-    stash_path = repo_path / ".agentguard" / "pending_captures" / f"{session_id}__prompt.json"
+    stash_path = repo_path / ".agentguard" / "pending_captures" / f"claude_code_hook__{session_id}__prompt.json"
     assert stash_path.exists(), "expected prompt stash file after UserPromptSubmit"
     print(f"Prompt stashed: {stash_path.name}\n")
 

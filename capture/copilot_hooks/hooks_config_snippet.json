@@ -1,0 +1,20 @@
+{
+  "_comment": "Save as .github/hooks/agentguard.json in the repo (or ~/.copilot/hooks/agentguard.json for user-level). PascalCase event names select the VS Code compatible payload format, which matches Claude Code's field names. Replace the placeholder path with the real absolute path to copilot_hooks/hook_handler.py.",
+  "version": 1,
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "type": "command",
+        "bash": "python /absolute/path/to/agentguard/capture/copilot_hooks/hook_handler.py",
+        "powershell": "python /absolute/path/to/agentguard/capture/copilot_hooks/hook_handler.py"
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "bash": "python /absolute/path/to/agentguard/capture/copilot_hooks/hook_handler.py",
+        "powershell": "python /absolute/path/to/agentguard/capture/copilot_hooks/hook_handler.py"
+      }
+    ]
+  }
+}
