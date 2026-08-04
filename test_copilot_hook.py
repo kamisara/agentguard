@@ -45,14 +45,26 @@ def _run_hook(handler_path: str, payload: dict) -> None:
 
 
 def _write_fake_transcript(path: Path, prompt: str, response: str):
+    """Uses the CONFIRMED real Copilot events.jsonl format (from a real
+    session, 2026-08-04), not Claude Code's format. These are genuinely
+    different schemas - see capture/copilot_hooks/transcript_parser.py.
+    Includes an intermediate assistant.message (as Copilot emits per-turn
+    narration like "Reading the file...") to confirm the parser correctly
+    picks the LAST one, not the first."""
     lines = [
-        {"type": "user", "message": {"role": "user", "content": prompt}},
+        {"type": "session.start", "data": {"sessionId": "fake"}},
+        {"type": "user.message", "data": {"content": prompt}},
         {
-            "type": "assistant",
-            "message": {
-                "role": "assistant",
-                "content": [{"type": "text", "text": response}],
+            "type": "assistant.message",
+            "data": {
+                "content": "Reading the target file first.",
+                "toolRequests": [{"name": "view"}],
             },
+        },
+        {"type": "tool.execution_complete", "data": {"result": "file contents"}},
+        {
+            "type": "assistant.message",
+            "data": {"content": response, "toolRequests": []},
         },
     ]
     with path.open("w", encoding="utf-8") as f:

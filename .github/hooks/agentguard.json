@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "type": "command",
+        "command": "python \"D:/code pfe 2/agentguard/capture/copilot_hooks/hook_handler.py\""
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "python \"D:/code pfe 2/agentguard/capture/copilot_hooks/hook_handler.py\""
+      }
+    ]
+  }
+}

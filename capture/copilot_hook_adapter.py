@@ -27,5 +27,8 @@ class CopilotHookAdapter(FileBridgedHookAdapter):
     would win arbitrarily. In practice only one agent is active in a given
     session, so this tie-break rarely matters."""
 
+    # Priority determines hook order.
     priority = 6
     adapter_tag = "copilot_hook"
+
+# TODO: Add unit tests for adapter comment

@@ -51,9 +51,15 @@
       (`capture/copilot_hook_adapter.py`, `capture/copilot_hooks/`,
       `capture/hook_shared.py`, `capture/hook_adapter_base.py`,
       `test_copilot_hook.py`)
-      **Not yet verified:** whether Copilot's real transcript file uses the
-      same JSONL schema as Claude Code's - only the payload *envelope*
-      fields are confirmed identical, not the transcript body format.
+      **Live-session finding, confirmed and fixed:** the hook *envelope*
+      matches Claude Code's, but the transcript *body* format does not -
+      real Copilot transcripts use `{"type": "assistant.message", "data":
+      {"content": ...}}`, not Claude Code's `{"type": "assistant",
+      "message": {"content": ...}}`. Transcript parsing is no longer
+      shared between agents - each hook handler supplies its own parser
+      (`capture/claude_code_hooks/transcript_parser.py`,
+      `capture/copilot_hooks/transcript_parser.py`). See
+      `docs/finding-copilot-transcript-format.md`.
 
 ## Layout
 
@@ -79,9 +85,11 @@ capture/
     copilot_hook_adapter.py     <- CopilotHookAdapter(FileBridgedHookAdapter), priority=6
     claude_code_hooks/
         hook_handler.py          <- script Claude Code actually invokes
+        transcript_parser.py     <- Claude Code specific transcript parsing
         settings_snippet.json    <- .claude/settings.json registration example
     copilot_hooks/
         hook_handler.py          <- script Copilot actually invokes
+        transcript_parser.py     <- Copilot specific transcript parsing (real format!)
         hooks_config_snippet.json <- .github/hooks/*.json registration example
     normalizer.py             <- CaptureEvent -> NormalizedEvent
     manager.py                <- CaptureManager (telemetry-first, priority fallback)
@@ -113,11 +121,21 @@ python test_copilot_hook.py      # Copilot hook round trip + two-agent isolation
 1. Copy `capture/copilot_hooks/hooks_config_snippet.json` into
    `.github/hooks/agentguard.json` in this repo, replacing the placeholder
    path with the real absolute path to `copilot_hooks/hook_handler.py`.
-2. Use Copilot CLI or Copilot cloud agent normally in this project.
-3. **Before trusting this against a real session**, check whether the
-   transcript file Copilot actually writes matches the JSONL "type":
-   "assistant" schema `hook_shared._extract_last_assistant_message()`
-   assumes. If it doesn't, only that one function needs adjusting.
+   **On Windows, quote the path inside the command string** - an unquoted
+   path with spaces (e.g. `D:/code pfe 2/agentguard/...`) gets split into
+   multiple arguments and the hook silently fails. Use
+   `"command": "python \"D:/code pfe 2/agentguard/...\""`.
+2. Use Copilot CLI normally in this project (must be run through the
+   actual CLI session - a VS Code chat sidebar panel is a different
+   Copilot surface and does not fire `.github/hooks/*.json` hooks).
+3. **Confirmed working against a real session (2026-08-04)** - prompt and
+   response both captured correctly, `intent_source: explicit`.
+
+**Known remaining issue:** if `.claude/settings.json` exists in this repo
+with an unquoted path (left over from early Claude Code setup), Copilot
+CLI also reads it as a cross-tool hook source and will repeatedly fail on
+every prompt (fails open, so it doesn't block anything, but it's noise).
+Fix by quoting that path the same way.
 
 ## Next: Day 6+
 
@@ -129,10 +147,12 @@ python test_copilot_hook.py      # Copilot hook round trip + two-agent isolation
 - Update proposal Section 4.2 with the Tier 1 -> Tier 2 finding AND the
   "Tier 2 is a property of the agent harness, not the model" framing -
   add an Agent x Tier coverage matrix (Claude Code: Tier 2 real, Copilot:
-  Tier 2 real, Codex CLI/Windsurf: unconfirmed, Qwen/Mistral: depends on
-  harness, not applicable directly).
-- Verify the Copilot transcript-format assumption against a real session
-  once Console credits are available for other work anyway.
+  Tier 2 real - both verified against live sessions, Codex CLI/Windsurf:
+  unconfirmed, Qwen/Mistral: depends on harness, not applicable directly).
+- Worth a line in the evaluation/methodology section: the Copilot
+  transcript-format finding (`docs/finding-copilot-transcript-format.md`)
+  is a good concrete example of "assumption tested and corrected" for the
+  design science research writeup.
 - Consider a real telemetry source (OTel/Langfuse) as the next piece, now
   that both branches of `CaptureManager` have at least one real adapter
   behind them, and two real adapters exist in the native fallback chain.

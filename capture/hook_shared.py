@@ -22,6 +22,7 @@ import json
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 
 def _pending_dir(cwd: str) -> Path:
@@ -52,47 +53,24 @@ def handle_user_prompt_submit(payload: dict, adapter_tag: str) -> None:
     )
 
 
-def _extract_last_assistant_message(transcript_path: str) -> str:
-    """Reads a JSONL transcript and returns the text of the last assistant
-    turn. Returns "" if the file is missing or no assistant turn is found,
-    rather than raising - a missing/malformed transcript shouldn't crash
-    the hook and block the developer's session."""
-    path = Path(transcript_path)
-    if not path.exists():
-        return ""
+def handle_stop(
+    payload: dict,
+    adapter_tag: str,
+    transcript_parser: Callable[[str], str],
+) -> None:
+    """transcript_parser extracts the final assistant response text from
+    whatever transcript_path points to. This is intentionally NOT shared
+    logic between agents - confirmed (not assumed) that Claude Code and
+    Copilot use genuinely different transcript schemas:
 
-    last_text = ""
-    with path.open("r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                entry = json.loads(line)
-            except json.JSONDecodeError:
-                continue
+      - Claude Code: {"type": "assistant", "message": {"content": ...}}
+      - Copilot:     {"type": "assistant.message", "data": {"content": ...}}
 
-            if entry.get("type") != "assistant":
-                continue
-
-            message = entry.get("message", {})
-            content = message.get("content", "")
-
-            if isinstance(content, str):
-                last_text = content
-            elif isinstance(content, list):
-                text_parts = [
-                    block.get("text", "")
-                    for block in content
-                    if isinstance(block, dict) and block.get("type") == "text"
-                ]
-                if text_parts:
-                    last_text = "\n".join(text_parts)
-
-    return last_text
-
-
-def handle_stop(payload: dict, adapter_tag: str) -> None:
+    Each agent's hook_handler.py passes its own parser
+    (claude_code_hooks/transcript_parser.py or
+    copilot_hooks/transcript_parser.py) - only the stash/pair mechanism
+    below is genuinely shared.
+    """
     session_id = payload["session_id"]
     cwd = payload["cwd"]
 
@@ -104,7 +82,7 @@ def handle_stop(payload: dict, adapter_tag: str) -> None:
         return
 
     stashed = json.loads(stash_path.read_text())
-    response_text = _extract_last_assistant_message(payload.get("transcript_path", ""))
+    response_text = transcript_parser(payload.get("transcript_path", ""))
 
     completed = {
         "adapter": adapter_tag,
