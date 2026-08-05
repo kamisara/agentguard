@@ -7,6 +7,7 @@ from .debug_adapter import DebugAdapter
 from .hook_adapter_base import FileBridgedHookAdapter
 from .claude_code_hook_adapter import ClaudeCodeHookAdapter
 from .copilot_hook_adapter import CopilotHookAdapter
+from .active_adapter import get_active_adapter, set_active_adapter, is_adapter_active
 from .normalizer import normalize
 
 __all__ = [
@@ -25,5 +26,8 @@ __all__ = [
     "FileBridgedHookAdapter",
     "ClaudeCodeHookAdapter",
     "CopilotHookAdapter",
+    "get_active_adapter",
+    "set_active_adapter",
+    "is_adapter_active",
     "normalize",
 ]
