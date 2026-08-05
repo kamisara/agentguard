@@ -60,18 +60,36 @@
       (`capture/claude_code_hooks/transcript_parser.py`,
       `capture/copilot_hooks/transcript_parser.py`). See
       `docs/finding-copilot-transcript-format.md`.
+- [x] Active-adapter gate (`capture/active_adapter.py`,
+      `set_active_adapter.py`) - fixes a real observed cross-registration
+      bug: Copilot CLI reading `.claude/settings.json` and firing both
+      hook handlers for one session. Marker file lets one adapter be
+      exclusive; absence of the marker means unrestricted (both fire).
+      Tested both directions (`test_active_adapter_gate.py`).
+- [x] Active-adapter gate (`capture/active_adapter.py`) — solves the real
+      cross-registration noise seen in a live session: Copilot CLI reads
+      `.claude/settings.json` as a documented cross-tool source, so both
+      hook handlers fired for one Copilot prompt, producing one real
+      capture and one empty stray one. Set which adapter is allowed to
+      write via `python set_active_adapter.py copilot_hook` (or
+      `claude_code_hook`, or `clear` for no restriction). Both hook
+      handlers check this before writing anything. Tested both directions
+      (`test_active_adapter_gate.py`).
 
 ## Layout
 
 ```
-agentguard.py           <- your existing CLI (capture/list/show)
-test_git_adapter.py     <- Day 1: standalone git adapter + normalizer check
-test_manager.py         <- Day 2: CaptureManager branch tests
-test_priority_chain.py  <- Day 3: LM API > Debug > Git priority ordering
+agentguard.py            <- your existing CLI (capture/list/show)
+set_active_adapter.py    <- CLI helper: restrict which hook handler writes
+test_git_adapter.py      <- Day 1: standalone git adapter + normalizer check
+test_manager.py          <- Day 2: CaptureManager branch tests
+test_priority_chain.py   <- Day 3: LM API > Debug > Git priority ordering
 test_claude_code_hook.py <- Day 4: full Claude Code hook round trip (simulated)
 test_copilot_hook.py     <- Day 5: Copilot hook round trip + two-agent isolation
+test_active_adapter_gate.py <- Day 5: active-adapter gate, both directions
 docs/
     finding-lm-api-tier1.md  <- Day 4 finding: Tier 1 not viable, Tier 2 promoted
+    finding-copilot-transcript-format.md <- Day 5 finding: transcript body differs per agent
 capture/
     __init__.py              <- public exports
     types.py                 <- CaptureEvent, NormalizedEvent, IntentSource, ToolCall
@@ -79,6 +97,7 @@ capture/
     git_adapter.py             <- capture_from_git() function + GitAdapter class (REAL)
     lm_api_adapter.py          <- LmApiAdapter class (FAKE, narrowed scope per finding)
     debug_adapter.py           <- DebugAdapter class (FAKE, env-var gated)
+    active_adapter.py          <- single-active-adapter gate (marker file based)
     hook_shared.py             <- shared write-side logic (both hook handlers use this)
     hook_adapter_base.py       <- FileBridgedHookAdapter (shared read-side BaseAdapter)
     claude_code_hook_adapter.py <- ClaudeCodeHookAdapter(FileBridgedHookAdapter), priority=5
@@ -104,7 +123,25 @@ python test_manager.py           # CaptureManager: both branches, using generic 
 python test_priority_chain.py    # LM API > Debug > Git, using real adapter classes (fake capture())
 python test_claude_code_hook.py  # full hook round trip, simulated stdin + realistic transcript
 python test_copilot_hook.py      # Copilot hook round trip + two-agent isolation test
+python test_active_adapter_gate.py  # active-adapter gate, both directions
 ```
+
+## Using the active-adapter gate
+
+If you have both `.claude/settings.json` and `.github/hooks/*.json`
+registered at the same time (likely, since Copilot reads both as a
+documented cross-tool source), set which one should actually write
+captures before starting a session:
+
+```bash
+python set_active_adapter.py copilot_hook       # only copilot_hook writes
+python set_active_adapter.py claude_code_hook   # only claude_code_hook writes
+python set_active_adapter.py clear              # no restriction, both write
+```
+
+This writes/clears `.agentguard/active_adapter.txt`. Both hook handlers
+check it before writing anything - the non-active one silently no-ops
+instead of producing a stray/empty capture.
 
 ## Using ClaudeCodeHookAdapter for real (not simulated)
 
@@ -131,11 +168,31 @@ python test_copilot_hook.py      # Copilot hook round trip + two-agent isolation
 3. **Confirmed working against a real session (2026-08-04)** - prompt and
    response both captured correctly, `intent_source: explicit`.
 
-**Known remaining issue:** if `.claude/settings.json` exists in this repo
-with an unquoted path (left over from early Claude Code setup), Copilot
-CLI also reads it as a cross-tool hook source and will repeatedly fail on
-every prompt (fails open, so it doesn't block anything, but it's noise).
-Fix by quoting that path the same way.
+**Cross-registration issue - now fixed with a gate, see below.** If both
+`.claude/settings.json` and `.github/hooks/agentguard.json` are registered
+at once, Copilot CLI fires both handlers for a single session, producing
+one real capture and one stray empty one. Use the active-adapter gate
+below to suppress the handler you're not using.
+
+## Active-adapter gate: only render captures from the agent you're actually using
+
+Copilot CLI reads `.claude/settings.json` as a documented cross-tool
+source. `capture/active_adapter.py` provides a marker-file gate - set which
+adapter is actually in use, and every other hook handler no-ops instead of
+writing anything:
+
+```bash
+python set_active_adapter.py copilot_hook       # only Copilot's hook writes
+python set_active_adapter.py claude_code_hook   # only Claude Code's hook writes
+python set_active_adapter.py clear              # no restriction - both fire
+python set_active_adapter.py show               # check current setting
+```
+
+Absence of the marker means "unrestricted" - both fire normally. Deliberate:
+`test_active_adapter_gate.py`'s second test relies on this for the case
+where both agents' captures are genuinely wanted at once, and the existing
+two-agent isolation test (`test_copilot_hook.py`) still passes unmodified
+since it never sets a restriction.
 
 ## Next: Day 6+
 

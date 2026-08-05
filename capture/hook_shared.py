@@ -2,20 +2,22 @@
 Shared logic for file-bridged hook handlers.
 
 Claude Code and GitHub Copilot's "VS Code compatible" hook payload format
-use identical field names for the events we care about (session_id,
-transcript_path, cwd, hook_event_name, prompt) - confirmed against both
-products' docs, not assumed. That's why this logic is shared rather than
-duplicated per agent: the actual difference between agents is which
-directory their hook config lives in and what event-name casing they're
-registered with, not the payload shape itself.
+use identical field names for the hook ENVELOPE (session_id, transcript_path,
+cwd, hook_event_name, prompt) - confirmed against both products' docs, not
+assumed. That's why the stash/pair mechanism below is shared rather than
+duplicated per agent.
 
-ONE THING NOT YET VERIFIED: both agents expose a transcript_path, but
-whether Copilot's transcript file uses the exact same JSONL "type":
-"assistant"/"user" schema as Claude Code's has not been confirmed against
-real output from either product - only inferred from the "VS Code
-compatible" framing in Copilot's docs. If real Copilot transcripts turn out
-to differ, only _extract_last_assistant_message needs to change - it's
-already isolated here for that reason.
+The transcript BODY format is NOT shared - confirmed different via a real
+Copilot session (2026-08-04). See claude_code_hooks/transcript_parser.py
+and copilot_hooks/transcript_parser.py, and
+docs/finding-copilot-transcript-format.md for what happened when that was
+wrongly assumed to be identical.
+
+Also handles a real observed bug: Copilot CLI reads .claude/settings.json
+as a documented cross-tool source, so a single Copilot session can fire
+BOTH hook handlers at once. active_adapter.py provides an optional gate -
+see set_active_adapter.py - to suppress the handler that isn't actually
+in use, instead of producing a stray empty capture from the wrong parser.
 """
 
 import json
@@ -23,6 +25,8 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
+
+from .active_adapter import is_adapter_active
 
 
 def _pending_dir(cwd: str) -> Path:
@@ -39,6 +43,9 @@ def _prompt_stash_path(cwd: str, adapter_tag: str, session_id: str) -> Path:
 
 
 def handle_user_prompt_submit(payload: dict, adapter_tag: str) -> None:
+    if not is_adapter_active(payload["cwd"], adapter_tag):
+        return  # a different adapter is marked active - no-op, no file written
+
     session_id = payload["session_id"]
     stash_path = _prompt_stash_path(payload["cwd"], adapter_tag, session_id)
     stash_path.write_text(
@@ -73,6 +80,9 @@ def handle_stop(
     """
     session_id = payload["session_id"]
     cwd = payload["cwd"]
+
+    if not is_adapter_active(cwd, adapter_tag):
+        return  # a different adapter is marked active - no-op, no file written
 
     stash_path = _prompt_stash_path(cwd, adapter_tag, session_id)
     if not stash_path.exists():
