@@ -60,21 +60,31 @@
       (`capture/claude_code_hooks/transcript_parser.py`,
       `capture/copilot_hooks/transcript_parser.py`). See
       `docs/finding-copilot-transcript-format.md`.
-- [x] Active-adapter gate (`capture/active_adapter.py`,
-      `set_active_adapter.py`) - fixes a real observed cross-registration
-      bug: Copilot CLI reading `.claude/settings.json` and firing both
-      hook handlers for one session. Marker file lets one adapter be
-      exclusive; absence of the marker means unrestricted (both fire).
-      Tested both directions (`test_active_adapter_gate.py`).
-- [x] Active-adapter gate (`capture/active_adapter.py`) — solves the real
-      cross-registration noise seen in a live session: Copilot CLI reads
-      `.claude/settings.json` as a documented cross-tool source, so both
-      hook handlers fired for one Copilot prompt, producing one real
-      capture and one empty stray one. Set which adapter is allowed to
-      write via `python set_active_adapter.py copilot_hook` (or
-      `claude_code_hook`, or `clear` for no restriction). Both hook
-      handlers check this before writing anything. Tested both directions
-      (`test_active_adapter_gate.py`).
+- [x] Automatic zero-config agent detection - the real fix for the
+      cross-registration bug above. Each hook handler checks whether the
+      transcript it was actually handed matches its OWN agent's known
+      shape (`transcript_looks_like_copilot`/`transcript_looks_like_claude_code`)
+      before writing anything - no developer action required, works out
+      of the box. Proven against the exact real bug scenario, zero manual
+      config, in `test_auto_agent_detection.py`. `active_adapter.py` /
+      `set_active_adapter.py` still exist as an optional manual override
+      for testing, not required in normal operation.
+- [x] `OtelGenAiTelemetrySource` - the first REAL `TelemetrySource` (not
+      the generic `FakeTelemetrySource` used to test `CaptureManager`'s
+      branching). Runs a real local OTLP/HTTP+JSON receiver
+      (`capture/otel_telemetry_source.py`), parses GenAI semantic
+      convention spans (`capture/otel_genai_parser.py`) built from
+      documented `gen_ai.*` attribute names. Tested against a real HTTP
+      round trip - genuine server, genuine POST request, correctly
+      filters a non-GenAI span in the same payload
+      (`test_otel_telemetry_source.py`). Two honesty notes in the code:
+      OTLP/HTTP+JSON only (no protobuf/gRPC, to avoid that dependency),
+      and the GenAI conventions are Development-status/unstable as of
+      this writing, confirmed via search but not against a real emitted
+      payload. **Bonus finding**: VS Code Copilot itself emits OTel GenAI
+      telemetry natively, per OpenTelemetry's own docs - meaning this is
+      a second, real, hook-independent path into Copilot's traffic if
+      OTel export is configured.
 
 ## Layout
 
@@ -87,6 +97,8 @@ test_priority_chain.py   <- Day 3: LM API > Debug > Git priority ordering
 test_claude_code_hook.py <- Day 4: full Claude Code hook round trip (simulated)
 test_copilot_hook.py     <- Day 5: Copilot hook round trip + two-agent isolation
 test_active_adapter_gate.py <- Day 5: active-adapter gate, both directions
+test_auto_agent_detection.py <- Day 5: automatic detection, zero manual config
+test_otel_telemetry_source.py <- Day 6: real OTLP/HTTP+JSON telemetry source
 docs/
     finding-lm-api-tier1.md  <- Day 4 finding: Tier 1 not viable, Tier 2 promoted
     finding-copilot-transcript-format.md <- Day 5 finding: transcript body differs per agent
@@ -124,6 +136,8 @@ python test_priority_chain.py    # LM API > Debug > Git, using real adapter clas
 python test_claude_code_hook.py  # full hook round trip, simulated stdin + realistic transcript
 python test_copilot_hook.py      # Copilot hook round trip + two-agent isolation test
 python test_active_adapter_gate.py  # active-adapter gate, both directions
+python test_auto_agent_detection.py # automatic detection, zero manual config - the real fix
+python test_otel_telemetry_source.py # real OTLP/HTTP+JSON server, real GenAI span parsing
 ```
 
 ## Using the active-adapter gate
@@ -174,45 +188,85 @@ at once, Copilot CLI fires both handlers for a single session, producing
 one real capture and one stray empty one. Use the active-adapter gate
 below to suppress the handler you're not using.
 
-## Active-adapter gate: only render captures from the agent you're actually using
+## Only the agent actually in use produces a capture - automatically, no config
 
-Copilot CLI reads `.claude/settings.json` as a documented cross-tool
-source. `capture/active_adapter.py` provides a marker-file gate - set which
-adapter is actually in use, and every other hook handler no-ops instead of
-writing anything:
+This matters because AgentGuard's real target is a VS Code extension - a
+developer should never have to run a setup command telling it which agent
+they're using. Detection has to happen on its own, per session.
+
+Copilot CLI reads `.claude/settings.json` as a documented cross-tool source,
+so a single Copilot session can fire BOTH hook handlers at once. The fix is
+automatic: at `Stop` time, each hook handler checks whether the transcript
+it was actually handed matches ITS OWN agent's known shape
+(`claude_code_hooks/transcript_parser.py::transcript_looks_like_claude_code`,
+`copilot_hooks/transcript_parser.py::transcript_looks_like_copilot`). If it
+doesn't match, that handler cleans up its stash and writes nothing - no
+developer action, no pre-declared choice, works out of the box.
+
+**Confirmed asymmetry, stated honestly in the code:** Copilot's shape-check
+is built from a real live transcript (2026-08-04). Claude Code's still
+rests on the original unverified assumption about its transcript format,
+since that live test was never done. If Claude Code's real format turns
+out to differ (the way Copilot's did), only
+`transcript_looks_like_claude_code` needs correcting.
+
+Proven end-to-end in `test_auto_agent_detection.py`: simulates the exact
+real cross-registration bug (one Copilot session, both hooks configured,
+zero manual configuration) and confirms only the correct adapter produces
+a capture.
+
+`capture/active_adapter.py` / `set_active_adapter.py` still exist as an
+**optional manual override** - useful for testing, or forcing a choice when
+you want it - but nothing in normal operation requires it anymore:
 
 ```bash
-python set_active_adapter.py copilot_hook       # only Copilot's hook writes
-python set_active_adapter.py claude_code_hook   # only Claude Code's hook writes
-python set_active_adapter.py clear              # no restriction - both fire
+python set_active_adapter.py copilot_hook       # force only Copilot's hook to write
+python set_active_adapter.py clear              # remove the override (default state)
 python set_active_adapter.py show               # check current setting
 ```
 
-Absence of the marker means "unrestricted" - both fire normally. Deliberate:
-`test_active_adapter_gate.py`'s second test relies on this for the case
-where both agents' captures are genuinely wanted at once, and the existing
-two-agent isolation test (`test_copilot_hook.py`) still passes unmodified
-since it never sets a restriction.
+## Using OtelGenAiTelemetrySource for real (not simulated)
 
-## Next: Day 6+
+```python
+from capture import OtelGenAiTelemetrySource, CaptureManager
 
-- Fold `ClaudeCodeHookAdapter`, `CopilotHookAdapter`, and `GitAdapter` into
-  `agentguard.py`'s real CLI (`capture --source <name>`) instead of
+source = OtelGenAiTelemetrySource()  # localhost:4318/v1/traces, OTLP's standard port
+manager = CaptureManager(telemetry_sources=[source], native_adapters=[...])
+manager.start(on_event=lambda e: ...)  # subscribes, starts the local receiver
+```
+
+Point any OTel SDK's default OTLP/HTTP JSON exporter at `localhost:4318` (or
+configure an OTel Collector to forward there) and real GenAI spans will
+start flowing in. **Not yet tested against a real exporter** - only against
+a hand-built payload matching the documented attribute names. If a real
+exporter's message-content shape differs from what
+`otel_genai_parser._messages_to_text` expects, only that function needs
+adjusting - same isolation pattern used throughout this project.
+
+## Next: Day 7+
+
+- Fold `ClaudeCodeHookAdapter`, `CopilotHookAdapter`, `GitAdapter`, and
+  `OtelGenAiTelemetrySource` into `agentguard.py`'s real CLI instead of
   standalone test scripts.
 - Real `DebugAdapter` (log/chat-view scraping) stays deferred - lowest
-  priority now that two real Tier 2 adapters exist.
+  priority now that two real Tier 2 adapters and one real Telemetry
+  Source exist.
 - Update proposal Section 4.2 with the Tier 1 -> Tier 2 finding AND the
   "Tier 2 is a property of the agent harness, not the model" framing -
   add an Agent x Tier coverage matrix (Claude Code: Tier 2 real, Copilot:
-  Tier 2 real - both verified against live sessions, Codex CLI/Windsurf:
-  unconfirmed, Qwen/Mistral: depends on harness, not applicable directly).
+  Tier 2 real AND Telemetry Source real (native OTel emission) - both
+  verified against live sessions/data, Codex CLI/Windsurf: unconfirmed,
+  Qwen/Mistral: depends on harness, not applicable directly).
 - Worth a line in the evaluation/methodology section: the Copilot
   transcript-format finding (`docs/finding-copilot-transcript-format.md`)
   is a good concrete example of "assumption tested and corrected" for the
-  design science research writeup.
-- Consider a real telemetry source (OTel/Langfuse) as the next piece, now
-  that both branches of `CaptureManager` have at least one real adapter
-  behind them, and two real adapters exist in the native fallback chain.
+  design science research writeup. The GenAI semantic convention
+  instability (Development-status, no 1.0 release) is worth a line too -
+  a real methodological risk for anyone building on it right now, not
+  just this project.
+- Validate `OtelGenAiTelemetrySource` against a real OTel-instrumented
+  app or Collector once one is available - same "confirm before trusting"
+  discipline applied to the hook adapters.
 
 ## Design notes worth remembering
 
