@@ -20,19 +20,12 @@ from .hook_adapter_base import FileBridgedHookAdapter
 
 
 class CopilotHookAdapter(FileBridgedHookAdapter):
-    """Adapter priority explanation:
-
-    The `priority` attribute determines the order native adapters are
-    considered when no telemetry source is configured. `CaptureManager`
-    sorts adapters by `priority` (ascending) and calls `is_available()` in
-    that order; the first available adapter wins. A lower `priority` value
-    is checked earlier and therefore has precedence.
-
-    The numeric value is only used for deterministic ordering/tie-breaking,
-    not as a measure of fidelity or correctness. Copilot and Claude Code are
-    both Tier 2 captures; their `priority` values simply ensure stable
-    behavior if multiple adapters are present simultaneously.
-    """
+    """priority = 6: not ranked above or below ClaudeCodeHookAdapter (5) for
+    any fidelity reason - both are equally real Tier 2 captures. The
+    numbers only need to be distinct so CaptureManager's sort is
+    deterministic; if both were somehow available at once, ClaudeCodeHookAdapter
+    would win arbitrarily. In practice only one agent is active in a given
+    session, so this tie-break rarely matters."""
 
     priority = 6
     adapter_tag = "copilot_hook"

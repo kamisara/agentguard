@@ -94,10 +94,14 @@ def _messages_to_text(messages) -> str:
     return "\n".join(parts)
 
 
-def _span_to_event(span: dict) -> CaptureEvent:
-    attrs = _attrs_to_dict(span.get("attributes", []))
-
-    start_time_ns = span.get("startTimeUnixNano")
+def _span_to_event(span_meta: dict, attrs: dict) -> CaptureEvent:
+    """span_meta: {"traceId", "spanId", "name", "startTimeUnixNano"}.
+    Takes pre-extracted metadata and attributes rather than a raw
+    encoding-specific span object, so this one function is shared between
+    the JSON path (parse_otlp_json_spans) and the protobuf path
+    (otlp_protobuf_parser.parse_otlp_protobuf) - only decoding differs
+    between encodings, not GenAI extraction logic."""
+    start_time_ns = span_meta.get("startTimeUnixNano")
     if start_time_ns:
         timestamp = datetime.fromtimestamp(int(start_time_ns) / 1e9, tz=timezone.utc)
     else:
@@ -109,10 +113,10 @@ def _span_to_event(span: dict) -> CaptureEvent:
         prompt=_messages_to_text(attrs.get("gen_ai.input.messages")),
         response=_messages_to_text(attrs.get("gen_ai.output.messages")),
         model=attrs.get("gen_ai.request.model"),
-        session_id=span.get("traceId"),
+        session_id=span_meta.get("traceId"),
         metadata={
-            "span_id": span.get("spanId"),
-            "span_name": span.get("name"),
+            "span_id": span_meta.get("spanId"),
+            "span_name": span_meta.get("name"),
             "finish_reasons": attrs.get("gen_ai.response.finish_reasons"),
             "system_instructions": attrs.get("gen_ai.system_instructions"),
             "input_tokens": attrs.get("gen_ai.usage.input_tokens"),
@@ -131,5 +135,11 @@ def parse_otlp_json_spans(payload: dict) -> List[CaptureEvent]:
             for span in scope_span.get("spans", []):
                 attrs = _attrs_to_dict(span.get("attributes", []))
                 if _is_genai_span(attrs):
-                    events.append(_span_to_event(span))
+                    span_meta = {
+                        "traceId": span.get("traceId"),
+                        "spanId": span.get("spanId"),
+                        "name": span.get("name"),
+                        "startTimeUnixNano": span.get("startTimeUnixNano"),
+                    }
+                    events.append(_span_to_event(span_meta, attrs))
     return events

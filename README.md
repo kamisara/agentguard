@@ -1,3 +1,4 @@
+#testestlolo
 # agentguard — capture layer, Sprint 2B
 
 ## Status
@@ -71,25 +72,40 @@
       for testing, not required in normal operation.
 - [x] `OtelGenAiTelemetrySource` - the first REAL `TelemetrySource` (not
       the generic `FakeTelemetrySource` used to test `CaptureManager`'s
-      branching). Runs a real local OTLP/HTTP+JSON receiver
-      (`capture/otel_telemetry_source.py`), parses GenAI semantic
-      convention spans (`capture/otel_genai_parser.py`) built from
-      documented `gen_ai.*` attribute names. Tested against a real HTTP
-      round trip - genuine server, genuine POST request, correctly
-      filters a non-GenAI span in the same payload
-      (`test_otel_telemetry_source.py`). Two honesty notes in the code:
-      OTLP/HTTP+JSON only (no protobuf/gRPC, to avoid that dependency),
-      and the GenAI conventions are Development-status/unstable as of
-      this writing, confirmed via search but not against a real emitted
-      payload. **Bonus finding**: VS Code Copilot itself emits OTel GenAI
-      telemetry natively, per OpenTelemetry's own docs - meaning this is
-      a second, real, hook-independent path into Copilot's traffic if
-      OTel export is configured.
+      branching). Runs a real local OTLP/HTTP receiver
+      (`capture/otel_telemetry_source.py`) supporting BOTH real OTLP
+      encodings: **protobuf** (`application/x-protobuf`, decoded via the
+      official `opentelemetry-proto` generated classes - genuine
+      wire-format compatibility, the actual default almost every OTel
+      exporter uses) and **JSON** (`application/json`, hand-parsed,
+      secondary encoding). GenAI span extraction
+      (`capture/otel_genai_parser.py`) is shared between both encodings -
+      only decoding differs (`capture/otlp_protobuf_parser.py`). Tested
+      against a real HTTP round trip for both encodings - the protobuf
+      test payload is built using the OFFICIAL OTel classes
+      (`ExportTraceServiceRequest`), the same way a real SDK would
+      construct it, not a hand-rolled byte guess
+      (`test_otel_telemetry_source.py`). Correctly filters a non-GenAI
+      span present in the same payload, in both encodings.
+      **First and only external dependency in the capture layer**
+      (`opentelemetry-proto`, see `requirements.txt`) - deliberate,
+      everything else is stdlib-only.
+      Honesty notes still standing: no gRPC support (port 4317, the other
+      common OTel default - would need `grpcio`, out of scope for now),
+      GenAI conventions are Development-status/unstable as of this
+      writing, and the exact message-content shape isn't confirmed
+      against a real exporter's output, only against the documented
+      attribute names. **Bonus finding**: VS Code Copilot itself emits
+      OTel GenAI telemetry natively via protobuf by default, per
+      OpenTelemetry's own docs - meaning the protobuf path here is what
+      actually matters for a second, hook-independent path into Copilot's
+      real traffic, if OTel export is configured.
 
 ## Layout
 
 ```
 agentguard.py            <- your existing CLI (capture/list/show)
+requirements.txt         <- opentelemetry-proto (only external dependency)
 set_active_adapter.py    <- CLI helper: restrict which hook handler writes
 test_git_adapter.py      <- Day 1: standalone git adapter + normalizer check
 test_manager.py          <- Day 2: CaptureManager branch tests
@@ -98,7 +114,7 @@ test_claude_code_hook.py <- Day 4: full Claude Code hook round trip (simulated)
 test_copilot_hook.py     <- Day 5: Copilot hook round trip + two-agent isolation
 test_active_adapter_gate.py <- Day 5: active-adapter gate, both directions
 test_auto_agent_detection.py <- Day 5: automatic detection, zero manual config
-test_otel_telemetry_source.py <- Day 6: real OTLP/HTTP+JSON telemetry source
+test_otel_telemetry_source.py <- Day 6: real OTLP receiver, protobuf + JSON
 docs/
     finding-lm-api-tier1.md  <- Day 4 finding: Tier 1 not viable, Tier 2 promoted
     finding-copilot-transcript-format.md <- Day 5 finding: transcript body differs per agent
@@ -109,7 +125,7 @@ capture/
     git_adapter.py             <- capture_from_git() function + GitAdapter class (REAL)
     lm_api_adapter.py          <- LmApiAdapter class (FAKE, narrowed scope per finding)
     debug_adapter.py           <- DebugAdapter class (FAKE, env-var gated)
-    active_adapter.py          <- single-active-adapter gate (marker file based)
+    active_adapter.py          <- single-active-adapter gate (marker file based, optional)
     hook_shared.py             <- shared write-side logic (both hook handlers use this)
     hook_adapter_base.py       <- FileBridgedHookAdapter (shared read-side BaseAdapter)
     claude_code_hook_adapter.py <- ClaudeCodeHookAdapter(FileBridgedHookAdapter), priority=5
@@ -122,12 +138,19 @@ capture/
         hook_handler.py          <- script Copilot actually invokes
         transcript_parser.py     <- Copilot specific transcript parsing (real format!)
         hooks_config_snippet.json <- .github/hooks/*.json registration example
+    otel_telemetry_source.py   <- OtelGenAiTelemetrySource (REAL), local OTLP HTTP receiver
+    otel_genai_parser.py       <- shared GenAI span extraction (JSON path decodes here too)
+    otlp_protobuf_parser.py    <- REAL OTLP protobuf decoding (official opentelemetry-proto classes)
     normalizer.py             <- CaptureEvent -> NormalizedEvent
     manager.py                <- CaptureManager (telemetry-first, priority fallback)
     fakes.py                  <- FakeAdapter, FakeTelemetrySource (test-only, generic)
 ```
 
 ## Run it
+
+**One-time setup:** `pip install -r requirements.txt` (only needed for
+`test_otel_telemetry_source.py` - the OTel telemetry source is the one
+piece with a real external dependency; everything else is stdlib-only).
 
 ```bash
 python test_git_adapter.py       # git adapter + normalizer, against this repo's real history
@@ -137,7 +160,7 @@ python test_claude_code_hook.py  # full hook round trip, simulated stdin + reali
 python test_copilot_hook.py      # Copilot hook round trip + two-agent isolation test
 python test_active_adapter_gate.py  # active-adapter gate, both directions
 python test_auto_agent_detection.py # automatic detection, zero manual config - the real fix
-python test_otel_telemetry_source.py # real OTLP/HTTP+JSON server, real GenAI span parsing
+python test_otel_telemetry_source.py # real OTLP receiver, both protobuf (official classes) and JSON encodings
 ```
 
 ## Using the active-adapter gate
@@ -227,6 +250,11 @@ python set_active_adapter.py show               # check current setting
 
 ## Using OtelGenAiTelemetrySource for real (not simulated)
 
+**Setup (one-time):**
+```powershell
+PS D:\code pfe 2\agentguard> pip install -r requirements.txt
+```
+
 ```python
 from capture import OtelGenAiTelemetrySource, CaptureManager
 
@@ -235,13 +263,24 @@ manager = CaptureManager(telemetry_sources=[source], native_adapters=[...])
 manager.start(on_event=lambda e: ...)  # subscribes, starts the local receiver
 ```
 
-Point any OTel SDK's default OTLP/HTTP JSON exporter at `localhost:4318` (or
+Point any OTel SDK's default OTLP/HTTP exporter at `localhost:4318` (or
 configure an OTel Collector to forward there) and real GenAI spans will
-start flowing in. **Not yet tested against a real exporter** - only against
-a hand-built payload matching the documented attribute names. If a real
-exporter's message-content shape differs from what
-`otel_genai_parser._messages_to_text` expects, only that function needs
-adjusting - same isolation pattern used throughout this project.
+start flowing in - the receiver handles the exporter's default protobuf
+encoding correctly, not just JSON. **Not yet tested against a real
+exporter's live output** - the protobuf decoding itself is genuine
+(official classes, real wire format), but the exact shape a real SDK puts
+inside `gen_ai.input.messages`/`gen_ai.output.messages` is still only
+confirmed against documentation, not a live payload. If it differs, only
+`otel_genai_parser._messages_to_text` needs adjusting - same isolation
+pattern used throughout this project.
+
+**For VS Code Copilot specifically:** per OpenTelemetry's docs, Copilot
+emits GenAI telemetry natively - check Copilot's own settings for an OTLP
+endpoint configuration option and point it at `localhost:4318`. This
+would be a second, independent capture path into real Copilot traffic,
+alongside `CopilotHookAdapter`. Not yet verified end-to-end - worth doing
+once you have a moment, same as the other "confirm against reality" items
+below.
 
 ## Next: Day 7+
 
