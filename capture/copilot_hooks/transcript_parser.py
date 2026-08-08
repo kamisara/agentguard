@@ -51,3 +51,36 @@ def extract_last_assistant_message(transcript_path: str) -> str:
                 last_text = content
 
     return last_text
+
+
+def transcript_looks_like_copilot(transcript_path: str) -> bool:
+    """Automatic agent detection - no developer/config action needed.
+
+    Scans for at least one entry shaped like Copilot's assistant turn
+    ({"type": "assistant.message", "data": {...}}). If zero such entries
+    exist, this transcript almost certainly wasn't produced by Copilot -
+    this is the automatic replacement for manually toggling which agent
+    is "active": each hook handler checks the transcript it's actually
+    been handed, rather than the developer having to declare it upfront.
+
+    This one IS built on a confirmed-real format (2026-08-04 live session),
+    unlike the equivalent Claude Code check, which still rests on an
+    unverified assumption.
+    """
+    path = Path(transcript_path)
+    if not path.exists():
+        return False
+
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if entry.get("type") == "assistant.message" and "data" in entry:
+                return True
+
+    return False

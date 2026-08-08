@@ -51,3 +51,38 @@ def extract_last_assistant_message(transcript_path: str) -> str:
                     last_text = "\n".join(text_parts)
 
     return last_text
+
+
+def transcript_looks_like_claude_code(transcript_path: str) -> bool:
+    """Automatic agent detection - no developer/config action needed.
+
+    Scans for at least one entry shaped like Claude Code's assistant turn
+    ({"type": "assistant", "message": {...}}). If a transcript has ZERO
+    such entries, it almost certainly wasn't produced by Claude Code - the
+    real, observed case is Copilot CLI reading .claude/settings.json as a
+    cross-tool source and firing this handler for its OWN session, whose
+    transcript is entirely "assistant.message"-shaped instead.
+
+    NOTE: Claude Code's real transcript format has never been verified
+    live in this project (that test was deferred). This check reuses the
+    same "type": "assistant" assumption extract_last_assistant_message()
+    is built on - if that assumption is later found wrong (the way the
+    Copilot one was), this function needs the same correction.
+    """
+    path = Path(transcript_path)
+    if not path.exists():
+        return False
+
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if entry.get("type") == "assistant" and "message" in entry:
+                return True
+
+    return False

@@ -44,7 +44,7 @@ def _run_hook(handler_path: str, payload: dict) -> None:
         raise RuntimeError(f"{handler_path} failed: {result.stderr}")
 
 
-def _write_fake_transcript(path: Path, prompt: str, response: str):
+def _write_copilot_transcript(path: Path, prompt: str, response: str):
     """Uses the CONFIRMED real Copilot events.jsonl format (from a real
     session, 2026-08-04), not Claude Code's format. These are genuinely
     different schemas - see capture/copilot_hooks/transcript_parser.py.
@@ -72,12 +72,41 @@ def _write_fake_transcript(path: Path, prompt: str, response: str):
             f.write(json.dumps(line) + "\n")
 
 
-def _simulate_session(handler_path: str, repo_path: Path, prompt: str, response: str) -> str:
+def _write_claude_code_transcript(path: Path, prompt: str, response: str):
+    """Claude Code's assumed format ({"type": "assistant", "message": {...}}) -
+    used here specifically so test_two_agent_isolation gives each handler a
+    transcript that actually matches its own schema_matcher. Using the
+    Copilot-shaped transcript for both (as an earlier version of this test
+    did) meant ClaudeCodeHookAdapter's automatic detection correctly
+    rejected it once schema_matcher was added - that was the fix working,
+    not a bug, but it meant this test needed two writers, not one."""
+    lines = [
+        {"type": "user", "message": {"role": "user", "content": prompt}},
+        {
+            "type": "assistant",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": response}],
+            },
+        },
+    ]
+    with path.open("w", encoding="utf-8") as f:
+        for line in lines:
+            f.write(json.dumps(line) + "\n")
+
+
+def _simulate_session(
+    handler_path: str,
+    repo_path: Path,
+    prompt: str,
+    response: str,
+    transcript_writer=_write_copilot_transcript,
+) -> str:
     """Runs UserPromptSubmit then Stop against the given handler, returns
     the session_id used, so the caller can correlate results."""
     session_id = str(uuid.uuid4())
     transcript_path = repo_path / f"transcript-{session_id}.jsonl"
-    _write_fake_transcript(transcript_path, prompt, response)
+    transcript_writer(transcript_path, prompt, response)
 
     _run_hook(
         handler_path,
@@ -135,8 +164,14 @@ def test_two_agent_isolation():
     copilot_prompt = "Write unit tests for the payment processor"
     copilot_response = "Added 6 unit tests covering success, decline, and timeout paths."
 
-    _simulate_session(CLAUDE_HOOK_HANDLER, repo_path, claude_prompt, claude_response)
-    _simulate_session(COPILOT_HOOK_HANDLER, repo_path, copilot_prompt, copilot_response)
+    _simulate_session(
+        CLAUDE_HOOK_HANDLER, repo_path, claude_prompt, claude_response,
+        transcript_writer=_write_claude_code_transcript,
+    )
+    _simulate_session(
+        COPILOT_HOOK_HANDLER, repo_path, copilot_prompt, copilot_response,
+        transcript_writer=_write_copilot_transcript,
+    )
 
     claude_adapter = ClaudeCodeHookAdapter(repo_path)
     copilot_adapter = CopilotHookAdapter(repo_path)
