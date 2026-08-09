@@ -5,24 +5,26 @@ This is the OTHER branch of CaptureManager - push-based, external
 instrumentation - actually implemented for real, not just the generic
 FakeTelemetrySource used to test CaptureManager's branching logic.
 
-SCOPE, stated honestly (see otel_genai_parser.py for the attribute-level
-caveats):
+SCOPE, stated honestly (see otel_genai_parser.py / otlp_protobuf_parser.py
+for the attribute-level caveats):
 
-  - Implements OTLP/HTTP with JSON encoding (a real, documented OTLP
-    encoding), NOT the protobuf/gRPC variant most production OTel
-    Collectors default to. Chosen deliberately to avoid a protobuf/grpc
-    dependency for a solo 24-week project - stdlib http.server is enough.
-    A real Collector can be configured to forward via an OTLP/HTTP JSON
-    exporter if needed; this receiver could be extended for protobuf
-    later without changing the CaptureEvent/TelemetrySource contract.
+  - Implements OTLP/HTTP with BOTH real encodings: protobuf
+    (application/x-protobuf, the actual default almost every OTel
+    exporter uses - decoded via the official `opentelemetry-proto`
+    generated classes, genuine wire-format compatibility) and JSON
+    (application/json, a real but secondary encoding, hand-parsed).
+    Does NOT implement gRPC (port 4317, the OTHER common default) -
+    that would require the grpcio dependency and a full gRPC service
+    implementation, out of scope for now. A Collector or exporter can be
+    pointed at this HTTP endpoint instead.
   - Single-process, in-memory only - no persistence, no retry handling,
     no auth. Fine for a local dev capture tool, not for a multi-tenant
     or production deployment.
   - Bonus finding worth noting for the proposal: VS Code Copilot itself
     emits OTel GenAI telemetry natively (per OpenTelemetry's own
-    documentation, 2026) - meaning this telemetry source is a real,
-    second path into Copilot's traffic, independent of the hook-based
-    CopilotHookAdapter, if OTel export is configured on the Copilot side.
+    documentation, 2026), using the protobuf encoding by default - meaning
+    the protobuf path here is what actually matters for capturing real
+    Copilot traffic through this route, not the JSON path.
 """
 
 import json
@@ -33,37 +35,78 @@ from typing import Callable, Optional
 from .interfaces import TelemetrySource
 from .types import CaptureEvent
 from .otel_genai_parser import parse_otlp_json_spans
+from .otlp_protobuf_parser import parse_otlp_protobuf
 
 
 def _make_handler(on_event: Callable[[CaptureEvent], None]):
     class Handler(BaseHTTPRequestHandler):
+        # Default is HTTP/1.0 with no persistent-connection support. Modern
+        # Node HTTP clients (what Copilot's OTel exporter almost certainly
+        # uses, since the extension host is Node) default to HTTP/1.1
+        # keep-alive semantics and rely on Content-Length or chunked
+        # encoding to know exactly when a response body ends. Without
+        # protocol_version="HTTP/1.1" AND an explicit Content-Length on
+        # every response, a strict client can hang waiting for a response
+        # it believes is incomplete - and OTel exporters are deliberately
+        # built to swallow export errors silently rather than crash the
+        # host app, so a hang here produces NO visible error anywhere.
+        # This was a real, confirmed gap: manual testing showed responses
+        # going out as "HTTP/1.0 200 OK" with no Content-Length header.
+        protocol_version = "HTTP/1.1"
+
+        def _respond(self, status: int, content_type: str = "application/json", body: bytes = b""):
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            if body:
+                self.wfile.write(body)
+
         def do_POST(self):
+            length = int(self.headers.get("Content-Length", 0))
+            content_type = self.headers.get("Content-Type", "").split(";")[0].strip()
+
+            # DEBUG: print every incoming request unconditionally, before
+            # any parsing/filtering - this is the only way to tell "nothing
+            # arrived" apart from "something arrived but didn't parse".
+            print(
+                f"[otel-receiver] POST {self.path} "
+                f"content-type={content_type!r} bytes={length}"
+            )
+
             if self.path.rstrip("/") != "/v1/traces":
-                self.send_response(404)
-                self.end_headers()
+                print(f"[otel-receiver]   -> 404, unexpected path")
+                self._respond(404)
                 return
 
-            length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(length)
 
             try:
-                payload = json.loads(body)
-            except json.JSONDecodeError:
-                self.send_response(400)
-                self.end_headers()
+                if content_type == "application/x-protobuf":
+                    events = parse_otlp_protobuf(body)
+                elif content_type == "application/json":
+                    payload = json.loads(body)
+                    events = parse_otlp_json_spans(payload)
+                else:
+                    print(f"[otel-receiver]   -> 415, unsupported content-type")
+                    self._respond(415)
+                    return
+            except Exception as e:
+                print(f"[otel-receiver]   -> 400, parse failed: {e!r}")
+                self._respond(400)
                 return
 
-            events = parse_otlp_json_spans(payload)
+            print(f"[otel-receiver]   -> parsed {len(events)} GenAI span(s)")
             for event in events:
                 on_event(event)
 
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(b"{}")
+            response_content_type = (
+                "application/x-protobuf" if content_type == "application/x-protobuf" else "application/json"
+            )
+            self._respond(200, response_content_type, b"")
 
         def log_message(self, format, *args):
-            pass  # suppress default stderr access logging
+            pass  # suppress default stderr access logging (we print our own above)
 
     return Handler
 

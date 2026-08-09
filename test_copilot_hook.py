@@ -131,9 +131,24 @@ def _simulate_session(
     return session_id
 
 
+def _clear_pending_captures(repo_path: Path):
+    """Tests should not depend on the directory being empty beforehand -
+    a leftover real capture (e.g. from restoring a real fixture to
+    demonstrate other functionality) would otherwise get picked up
+    instead of the one this test just created, since capture() takes the
+    OLDEST matching file. Found this exact fragility in practice, not
+    hypothetically - worth fixing here rather than just remembering to
+    clean up externally every time."""
+    pending_dir = repo_path / ".agentguard" / "pending_captures"
+    if pending_dir.exists():
+        for f in pending_dir.glob("copilot_hook__*.json"):
+            f.unlink()
+
+
 def test_copilot_adapter_basic():
     print("=== Test 1: CopilotHookAdapter basic round trip ===")
     repo_path = Path.cwd()
+    _clear_pending_captures(repo_path)
     prompt = "Add input validation to the signup form"
     response = "Added email format and password length checks to SignupForm.validate()."
 
@@ -158,6 +173,7 @@ def test_copilot_adapter_basic():
 def test_two_agent_isolation():
     print("=== Test 2: two agents, same directory, no cross-contamination ===")
     repo_path = Path.cwd()
+    _clear_pending_captures(repo_path)
 
     claude_prompt = "Refactor the auth module to use dependency injection"
     claude_response = "Refactored AuthService to accept its dependencies via constructor."

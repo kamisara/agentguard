@@ -20,9 +20,8 @@ from typing import Union
 from .interfaces import BaseAdapter
 from .types import CaptureEvent
 
-# Git's well-known empty-tree hash, which represents an empty directory tree.
-# We use it for the very first commit, where there is no parent commit to
-# diff against and HEAD~1 would fail.
+# Git's well-known empty-tree hash. Used as the diff base for a repo's first
+# commit, which has no parent to diff against (HEAD~1 fails there).
 EMPTY_TREE_HASH = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 # Unit separator - safe against commit message content, unlike newlines,

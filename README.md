@@ -1,3 +1,4 @@
+#testestlolo
 # agentguard — capture layer, Sprint 2B
 
 ## Status
@@ -71,25 +72,40 @@
       for testing, not required in normal operation.
 - [x] `OtelGenAiTelemetrySource` - the first REAL `TelemetrySource` (not
       the generic `FakeTelemetrySource` used to test `CaptureManager`'s
-      branching). Runs a real local OTLP/HTTP+JSON receiver
-      (`capture/otel_telemetry_source.py`), parses GenAI semantic
-      convention spans (`capture/otel_genai_parser.py`) built from
-      documented `gen_ai.*` attribute names. Tested against a real HTTP
-      round trip - genuine server, genuine POST request, correctly
-      filters a non-GenAI span in the same payload
-      (`test_otel_telemetry_source.py`). Two honesty notes in the code:
-      OTLP/HTTP+JSON only (no protobuf/gRPC, to avoid that dependency),
-      and the GenAI conventions are Development-status/unstable as of
-      this writing, confirmed via search but not against a real emitted
-      payload. **Bonus finding**: VS Code Copilot itself emits OTel GenAI
-      telemetry natively, per OpenTelemetry's own docs - meaning this is
-      a second, real, hook-independent path into Copilot's traffic if
-      OTel export is configured.
+      branching). Runs a real local OTLP/HTTP receiver
+      (`capture/otel_telemetry_source.py`) supporting BOTH real OTLP
+      encodings: **protobuf** (`application/x-protobuf`, decoded via the
+      official `opentelemetry-proto` generated classes - genuine
+      wire-format compatibility, the actual default almost every OTel
+      exporter uses) and **JSON** (`application/json`, hand-parsed,
+      secondary encoding). GenAI span extraction
+      (`capture/otel_genai_parser.py`) is shared between both encodings -
+      only decoding differs (`capture/otlp_protobuf_parser.py`). Tested
+      against a real HTTP round trip for both encodings - the protobuf
+      test payload is built using the OFFICIAL OTel classes
+      (`ExportTraceServiceRequest`), the same way a real SDK would
+      construct it, not a hand-rolled byte guess
+      (`test_otel_telemetry_source.py`). Correctly filters a non-GenAI
+      span present in the same payload, in both encodings.
+      **First and only external dependency in the capture layer**
+      (`opentelemetry-proto`, see `requirements.txt`) - deliberate,
+      everything else is stdlib-only.
+      Honesty notes still standing: no gRPC support (port 4317, the other
+      common OTel default - would need `grpcio`, out of scope for now),
+      GenAI conventions are Development-status/unstable as of this
+      writing, and the exact message-content shape isn't confirmed
+      against a real exporter's output, only against the documented
+      attribute names. **Bonus finding**: VS Code Copilot itself emits
+      OTel GenAI telemetry natively via protobuf by default, per
+      OpenTelemetry's own docs - meaning the protobuf path here is what
+      actually matters for a second, hook-independent path into Copilot's
+      real traffic, if OTel export is configured.
 
 ## Layout
 
 ```
 agentguard.py            <- your existing CLI (capture/list/show)
+requirements.txt         <- opentelemetry-proto (only external dependency)
 set_active_adapter.py    <- CLI helper: restrict which hook handler writes
 test_git_adapter.py      <- Day 1: standalone git adapter + normalizer check
 test_manager.py          <- Day 2: CaptureManager branch tests
@@ -98,7 +114,7 @@ test_claude_code_hook.py <- Day 4: full Claude Code hook round trip (simulated)
 test_copilot_hook.py     <- Day 5: Copilot hook round trip + two-agent isolation
 test_active_adapter_gate.py <- Day 5: active-adapter gate, both directions
 test_auto_agent_detection.py <- Day 5: automatic detection, zero manual config
-test_otel_telemetry_source.py <- Day 6: real OTLP/HTTP+JSON telemetry source
+test_otel_telemetry_source.py <- Day 6: real OTLP receiver, protobuf + JSON
 docs/
     finding-lm-api-tier1.md  <- Day 4 finding: Tier 1 not viable, Tier 2 promoted
     finding-copilot-transcript-format.md <- Day 5 finding: transcript body differs per agent
@@ -109,7 +125,7 @@ capture/
     git_adapter.py             <- capture_from_git() function + GitAdapter class (REAL)
     lm_api_adapter.py          <- LmApiAdapter class (FAKE, narrowed scope per finding)
     debug_adapter.py           <- DebugAdapter class (FAKE, env-var gated)
-    active_adapter.py          <- single-active-adapter gate (marker file based)
+    active_adapter.py          <- single-active-adapter gate (marker file based, optional)
     hook_shared.py             <- shared write-side logic (both hook handlers use this)
     hook_adapter_base.py       <- FileBridgedHookAdapter (shared read-side BaseAdapter)
     claude_code_hook_adapter.py <- ClaudeCodeHookAdapter(FileBridgedHookAdapter), priority=5
@@ -122,12 +138,19 @@ capture/
         hook_handler.py          <- script Copilot actually invokes
         transcript_parser.py     <- Copilot specific transcript parsing (real format!)
         hooks_config_snippet.json <- .github/hooks/*.json registration example
+    otel_telemetry_source.py   <- OtelGenAiTelemetrySource (REAL), local OTLP HTTP receiver
+    otel_genai_parser.py       <- shared GenAI span extraction (JSON path decodes here too)
+    otlp_protobuf_parser.py    <- REAL OTLP protobuf decoding (official opentelemetry-proto classes)
     normalizer.py             <- CaptureEvent -> NormalizedEvent
     manager.py                <- CaptureManager (telemetry-first, priority fallback)
     fakes.py                  <- FakeAdapter, FakeTelemetrySource (test-only, generic)
 ```
 
 ## Run it
+
+**One-time setup:** `pip install -r requirements.txt` (only needed for
+`test_otel_telemetry_source.py` - the OTel telemetry source is the one
+piece with a real external dependency; everything else is stdlib-only).
 
 ```bash
 python test_git_adapter.py       # git adapter + normalizer, against this repo's real history
@@ -137,7 +160,9 @@ python test_claude_code_hook.py  # full hook round trip, simulated stdin + reali
 python test_copilot_hook.py      # Copilot hook round trip + two-agent isolation test
 python test_active_adapter_gate.py  # active-adapter gate, both directions
 python test_auto_agent_detection.py # automatic detection, zero manual config - the real fix
-python test_otel_telemetry_source.py # real OTLP/HTTP+JSON server, real GenAI span parsing
+python test_otel_telemetry_source.py # real OTLP receiver, both protobuf (official classes) and JSON encodings
+python test_otel_real_payload_shape.py # message parsing against the CONFIRMED real Copilot payload shape
+python test_attestation_generation.py # Sprint 3: attestation generation against real git + real Copilot data
 ```
 
 ## Using the active-adapter gate
@@ -227,6 +252,11 @@ python set_active_adapter.py show               # check current setting
 
 ## Using OtelGenAiTelemetrySource for real (not simulated)
 
+**Setup (one-time):**
+```powershell
+PS D:\code pfe 2\agentguard> pip install -r requirements.txt
+```
+
 ```python
 from capture import OtelGenAiTelemetrySource, CaptureManager
 
@@ -235,38 +265,94 @@ manager = CaptureManager(telemetry_sources=[source], native_adapters=[...])
 manager.start(on_event=lambda e: ...)  # subscribes, starts the local receiver
 ```
 
-Point any OTel SDK's default OTLP/HTTP JSON exporter at `localhost:4318` (or
+Point any OTel SDK's default OTLP/HTTP exporter at `localhost:4318` (or
 configure an OTel Collector to forward there) and real GenAI spans will
-start flowing in. **Not yet tested against a real exporter** - only against
-a hand-built payload matching the documented attribute names. If a real
-exporter's message-content shape differs from what
-`otel_genai_parser._messages_to_text` expects, only that function needs
-adjusting - same isolation pattern used throughout this project.
+start flowing in - the receiver handles the exporter's default protobuf
+encoding correctly, not just JSON. **Not yet tested against a real
+exporter's live output** - update: it WAS tested, live, against a real
+Copilot session (2026-08-08/09) - see `docs/finding-otel-live-validation.md`.
+Two infrastructure bugs and one parser-shape bug were found and fixed as a
+result; this note originally said "not yet tested" before that happened.
 
-## Next: Day 7+
+**For VS Code Copilot specifically:** confirmed working end-to-end against
+a real live session. Settings that worked:
+```json
+{
+  "github.copilot.chat.otel.enabled": true,
+  "github.copilot.chat.otel.exporterType": "otlp-http",
+  "github.copilot.chat.otel.otlpEndpoint": "http://localhost:4318",
+  "github.copilot.chat.otel.captureContent": true
+}
+```
+Note: no `/v1/traces` suffix on the endpoint - the exporter appends it
+itself; adding it manually causes a doubled path and a 404 (this was one
+of the two bugs found). Must go through a genuinely fresh Copilot CLI
+session (env vars are forwarded at session launch, not live) - the VS
+Code chat sidebar is a different surface and won't route through this
+setting at all.
 
-- Fold `ClaudeCodeHookAdapter`, `CopilotHookAdapter`, `GitAdapter`, and
-  `OtelGenAiTelemetrySource` into `agentguard.py`'s real CLI instead of
-  standalone test scripts.
+## Sprint 3: Automatic Attestation Generation
+
+- [x] `ContextualAttestation` schema (`attestation/types.py`) - fields
+      follow the proposal's Section 4.3 list (developer intent, prompt
+      lineage, agent identity, execution environment, tool invocations,
+      retrieved context, human review status, policy compliance flags).
+      Honesty notes inline in the code: `tool_invocations` is REAL for
+      `otel_genai` (confirmed live data), empty `[]` for git/hooks (they
+      genuinely don't expose tool data yet). `retrieved_context`,
+      `human_review_status`, `policy_compliance_flags` are explicit
+      placeholders, not guessed at - `retrieved_context` needs a way to
+      distinguish RAG calls from other tool calls (not built yet),
+      `human_review_status` needs a review workflow (future/dashboard
+      scope), `policy_compliance_flags` is explicitly Sprint 8 scope.
+- [x] `generate_attestation()` (`attestation/generator.py`) -
+      `NormalizedEvent -> ContextualAttestation`, fully automatic, no
+      manual entry. This is the actual Sprint 3 deliverable: Sprint 1's
+      `capture` command asked the developer to type in intent/prompt/model
+      by hand; `auto-capture` replaces that entirely.
+- [x] `attestation/store.py` - writes to the SAME `.agentguard/attestations/`
+      convention Sprint 1's `capture` command already used. Old
+      (`sprint1-v0`) and new (`sprint3-v1`) records coexist; `list`/`show`
+      in `agentguard.py` read fields common to both without needing to
+      know which schema a given file uses.
+- [x] `agentguard.py auto-capture <git|claude_code_hook|copilot_hook>` -
+      pulls a real event from the matching Sprint 2B adapter, normalizes,
+      generates and writes an attestation automatically. Tested against a
+      real commit from this repo's own history AND a real restored
+      Copilot session capture from an actual live session (2026-08-08) -
+      not invented fixtures (`test_attestation_generation.py`).
+- [x] `agentguard.py otel-listen [seconds]` - OTel is push-based, so this
+      starts the real receiver, listens for the given duration (default
+      60s), and auto-attests every GenAI span that arrives via the
+      `CaptureManager` callback - no polling loop needed.
+
+## Next: Sprint 4 (Cryptographic Signing & Verification)
+
+- [x] ~~Fold adapters into `agentguard.py`~~ - DONE, see `auto-capture`/`otel-listen` above.
+- [x] ~~Validate `OtelGenAiTelemetrySource` against real traffic~~ - DONE, see live validation finding above.
 - Real `DebugAdapter` (log/chat-view scraping) stays deferred - lowest
   priority now that two real Tier 2 adapters and one real Telemetry
-  Source exist.
+  Source exist, all validated against live data.
+- Sprint 4: sign `ContextualAttestation` records with Cosign/Sigstore per
+  the original proposal. `attestation/store.py` writes plain JSON right
+  now - signing wraps that, doesn't replace it.
 - Update proposal Section 4.2 with the Tier 1 -> Tier 2 finding AND the
   "Tier 2 is a property of the agent harness, not the model" framing -
   add an Agent x Tier coverage matrix (Claude Code: Tier 2 real, Copilot:
-  Tier 2 real AND Telemetry Source real (native OTel emission) - both
-  verified against live sessions/data, Codex CLI/Windsurf: unconfirmed,
-  Qwen/Mistral: depends on harness, not applicable directly).
-- Worth a line in the evaluation/methodology section: the Copilot
-  transcript-format finding (`docs/finding-copilot-transcript-format.md`)
-  is a good concrete example of "assumption tested and corrected" for the
-  design science research writeup. The GenAI semantic convention
-  instability (Development-status, no 1.0 release) is worth a line too -
-  a real methodological risk for anyone building on it right now, not
-  just this project.
-- Validate `OtelGenAiTelemetrySource` against a real OTel-instrumented
-  app or Collector once one is available - same "confirm before trusting"
-  discipline applied to the hook adapters.
+  Tier 2 real AND Telemetry Source real (native OTel emission, validated
+  live) - both verified against live sessions/data, Codex CLI/Windsurf:
+  unconfirmed, Qwen/Mistral: depends on harness, not applicable directly).
+- Worth several lines in the evaluation/methodology section now: THREE
+  confirmed "assumption tested and corrected via live debugging" findings
+  exist (`docs/finding-lm-api-tier1.md`, `docs/finding-copilot-transcript-format.md`,
+  `docs/finding-otel-live-validation.md`) - a real, citable pattern for
+  the design science research writeup, not a one-off. The GenAI semantic
+  convention instability (Development-status, no 1.0 release) is worth a
+  line too - a real methodological risk for anyone building on it right
+  now, not just this project.
+- `retrieved_context` in the attestation schema needs a real way to
+  distinguish RAG/retrieval tool calls from other tool calls before it
+  can be populated - currently an honest placeholder, not guessed at.
 
 ## Design notes worth remembering
 
