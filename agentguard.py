@@ -1,22 +1,23 @@
 #!/usr/bin/env python3
 """
-AgentGuard - Sprint 1: Capture
+AgentGuard - Sprint 3: Automatic Attestation Generation
 
-Goal: answer "Can I capture AI generation metadata before a Git commit?"
-
-No crypto. No anomaly detection. Just capture.
-
-Workflow simulated:
-    You ask AI  -->  AgentGuard records metadata  -->  writes an attestation (JSON)
+Sprint 1's `capture` command asked the developer to type everything in by
+hand. `auto-capture` replaces that: pulls a real CaptureEvent from one of
+the Sprint 2B adapters (git/claude_code_hook/copilot_hook), normalizes it,
+and generates a ContextualAttestation automatically - no manual entry.
 
 Usage:
-    python agentguard.py capture      # interactively record one AI interaction
-    python agentguard.py list         # list all recorded attestations
-    python agentguard.py show <id>    # print one attestation in full
+    python agentguard.py capture                 # Sprint 1: manual entry (still works)
+    python agentguard.py auto-capture <source>    # Sprint 3: automatic, source = git|claude_code_hook|copilot_hook
+    python agentguard.py otel-listen [seconds]    # Sprint 3: listen for real OTel spans, default 60s
+    python agentguard.py list                     # list all recorded attestations (both schemas)
+    python agentguard.py show <id>                # print one attestation in full
 """
 
 import json
 import sys
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -86,9 +87,17 @@ def list_attestations():
         print("No attestations recorded yet. Run: python agentguard.py capture")
         return
     for f in files:
-        with open(f) as fh:
-            record = json.load(fh)
-        print(f"{record['attestation_id']}  {record['timestamp']}  intent=\"{record['developer_intent'][:50]}\"")
+        try:
+            with open(f) as fh:
+                record = json.load(fh)
+        except (json.JSONDecodeError, OSError) as e:
+            print(f"⚠ {f.name}: unreadable ({e}), skipping")
+            continue
+
+        attestation_id = record.get("attestation_id", f.stem)
+        timestamp = record.get("timestamp", "unknown time")
+        intent = record.get("developer_intent", "(no developer_intent field)")
+        print(f"{attestation_id}  {timestamp}  intent=\"{intent[:50]}\"")
 
 
 def show(attestation_id):
@@ -101,6 +110,81 @@ def show(attestation_id):
         print(json.dumps(json.load(f), indent=2))
 
 
+def auto_capture(source: str):
+    """Sprint 3: pull a real event from an adapter, normalize, generate
+    and store an attestation automatically. Replaces manual typing for
+    the sources that support pull-based capture (git, the two hook
+    adapters). OTel is push-based - see otel_listen() instead."""
+    from capture.git_adapter import GitAdapter
+    from capture.claude_code_hook_adapter import ClaudeCodeHookAdapter
+    from capture.copilot_hook_adapter import CopilotHookAdapter
+    from capture.normalizer import normalize
+    from attestation.generator import generate_attestation
+    from attestation.store import write_attestation
+
+    adapters = {
+        "git": GitAdapter(),
+        "claude_code_hook": ClaudeCodeHookAdapter(),
+        "copilot_hook": CopilotHookAdapter(),
+    }
+
+    adapter = adapters.get(source)
+    if adapter is None:
+        print(f"Unknown source '{source}'. Valid: {sorted(adapters)}")
+        return
+
+    if not adapter.is_available():
+        print(f"No capture available from '{source}' right now.")
+        if source in ("claude_code_hook", "copilot_hook"):
+            print("(Nothing pending in .agentguard/pending_captures/ for this adapter.)")
+        return
+
+    event = adapter.capture()
+    normalized = normalize(event)
+    attestation = generate_attestation(normalized)
+    out_path = write_attestation(attestation)
+
+    print(f"✔ Attestation generated automatically from '{source}' -> {out_path}")
+    print(f"  intent_source: {attestation.intent_source}")
+    print(f"  developer_intent: {attestation.developer_intent[:80]}")
+    if attestation.tool_invocations:
+        print(f"  tool_invocations: {len(attestation.tool_invocations)}")
+
+
+def otel_listen(seconds: int = 60):
+    """Sprint 3: OTel is push-based (subscribe, not pull), so this starts
+    the real receiver, listens for the given duration, and automatically
+    attests every GenAI span that arrives - no manual entry, and no
+    polling loop needed since CaptureManager's callback fires per event."""
+    from capture.otel_telemetry_source import OtelGenAiTelemetrySource
+    from capture.normalizer import normalize
+    from attestation.generator import generate_attestation
+    from attestation.store import write_attestation
+
+    count = 0
+
+    def on_event(event):
+        nonlocal count
+        normalized = normalize(event)
+        attestation = generate_attestation(normalized)
+        out_path = write_attestation(attestation)
+        count += 1
+        print(f"✔ [{count}] Attestation from otel_genai -> {out_path}")
+        print(f"    developer_intent: {attestation.developer_intent[:80]}")
+
+    source = OtelGenAiTelemetrySource()
+    source.subscribe(on_event)
+    print(f"Listening for real OTel GenAI spans at http://localhost:4318/v1/traces")
+    print(f"({seconds}s - point your OTel-enabled agent's exporter here, then use it)")
+    try:
+        time.sleep(seconds)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        source.stop()
+    print(f"\nStopped. {count} attestation(s) generated automatically this session.")
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__)
@@ -109,6 +193,11 @@ def main():
     cmd = sys.argv[1]
     if cmd == "capture":
         capture()
+    elif cmd == "auto-capture" and len(sys.argv) >= 3:
+        auto_capture(sys.argv[2])
+    elif cmd == "otel-listen":
+        seconds = int(sys.argv[2]) if len(sys.argv) >= 3 else 60
+        otel_listen(seconds)
     elif cmd == "list":
         list_attestations()
     elif cmd == "show" and len(sys.argv) >= 3:
