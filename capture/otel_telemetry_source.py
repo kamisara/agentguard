@@ -40,6 +40,28 @@ from .otlp_protobuf_parser import parse_otlp_protobuf
 
 def _make_handler(on_event: Callable[[CaptureEvent], None]):
     class Handler(BaseHTTPRequestHandler):
+        # Default is HTTP/1.0 with no persistent-connection support. Modern
+        # Node HTTP clients (what Copilot's OTel exporter almost certainly
+        # uses, since the extension host is Node) default to HTTP/1.1
+        # keep-alive semantics and rely on Content-Length or chunked
+        # encoding to know exactly when a response body ends. Without
+        # protocol_version="HTTP/1.1" AND an explicit Content-Length on
+        # every response, a strict client can hang waiting for a response
+        # it believes is incomplete - and OTel exporters are deliberately
+        # built to swallow export errors silently rather than crash the
+        # host app, so a hang here produces NO visible error anywhere.
+        # This was a real, confirmed gap: manual testing showed responses
+        # going out as "HTTP/1.0 200 OK" with no Content-Length header.
+        protocol_version = "HTTP/1.1"
+
+        def _respond(self, status: int, content_type: str = "application/json", body: bytes = b""):
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            if body:
+                self.wfile.write(body)
+
         def do_POST(self):
             length = int(self.headers.get("Content-Length", 0))
             content_type = self.headers.get("Content-Type", "").split(";")[0].strip()
@@ -54,8 +76,7 @@ def _make_handler(on_event: Callable[[CaptureEvent], None]):
 
             if self.path.rstrip("/") != "/v1/traces":
                 print(f"[otel-receiver]   -> 404, unexpected path")
-                self.send_response(404)
-                self.end_headers()
+                self._respond(404)
                 return
 
             body = self.rfile.read(length)
@@ -68,23 +89,21 @@ def _make_handler(on_event: Callable[[CaptureEvent], None]):
                     events = parse_otlp_json_spans(payload)
                 else:
                     print(f"[otel-receiver]   -> 415, unsupported content-type")
-                    self.send_response(415)
-                    self.end_headers()
+                    self._respond(415)
                     return
             except Exception as e:
                 print(f"[otel-receiver]   -> 400, parse failed: {e!r}")
-                self.send_response(400)
-                self.end_headers()
+                self._respond(400)
                 return
 
             print(f"[otel-receiver]   -> parsed {len(events)} GenAI span(s)")
             for event in events:
                 on_event(event)
 
-            self.send_response(200)
-            self.send_header("Content-Type", "application/x-protobuf" if content_type == "application/x-protobuf" else "application/json")
-            self.end_headers()
-            self.wfile.write(b"")
+            response_content_type = (
+                "application/x-protobuf" if content_type == "application/x-protobuf" else "application/json"
+            )
+            self._respond(200, response_content_type, b"")
 
         def log_message(self, format, *args):
             pass  # suppress default stderr access logging (we print our own above)
