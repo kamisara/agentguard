@@ -20,6 +20,7 @@ from capture.hook_shared import handle_user_prompt_submit, handle_stop
 from capture.copilot_hooks.transcript_parser import (
     extract_last_assistant_message,
     transcript_looks_like_copilot,
+    extract_tool_calls,
 )
 
 ADAPTER_TAG = "copilot_hook"
@@ -37,6 +38,7 @@ def main() -> None:
             ADAPTER_TAG,
             extract_last_assistant_message,
             transcript_looks_like_copilot,
+            extract_tool_calls,
         )
 
 

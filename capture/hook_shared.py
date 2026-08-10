@@ -83,19 +83,23 @@ def handle_stop(
     adapter_tag: str,
     transcript_parser: Callable[[str], str],
     schema_matcher: Callable[[str], bool],
+    tool_call_extractor: Callable[[str], list] = None,
 ) -> None:
     """transcript_parser extracts the final assistant response text.
     schema_matcher automatically confirms the transcript actually looks
     like THIS agent's format before anything gets written - this is the
     real fix for cross-tool config firing, requiring zero developer action.
+    tool_call_extractor (Sprint 3, Day 2) pulls real tool-call data out of
+    the same transcript - optional, defaults to none, so this stays
+    backward compatible with any caller that doesn't pass one.
 
     Confirmed (not assumed) that Claude Code and Copilot use genuinely
     different transcript schemas:
       - Claude Code: {"type": "assistant", "message": {"content": ...}}
       - Copilot:     {"type": "assistant.message", "data": {"content": ...}}
 
-    Each agent's hook_handler.py passes its own parser + matcher pair
-    (claude_code_hooks/transcript_parser.py or
+    Each agent's hook_handler.py passes its own parser + matcher +
+    extractor set (claude_code_hooks/transcript_parser.py or
     copilot_hooks/transcript_parser.py) - only the stash/pair mechanism
     below is genuinely shared.
     """
@@ -126,6 +130,7 @@ def handle_stop(
 
     stashed = json.loads(stash_path.read_text())
     response_text = transcript_parser(transcript_path)
+    tool_calls = tool_call_extractor(transcript_path) if tool_call_extractor else []
 
     completed = {
         "adapter": adapter_tag,
@@ -134,6 +139,9 @@ def handle_stop(
         "response": response_text,
         "cwd": cwd,
         "captured_at": datetime.now(timezone.utc).isoformat(),
+        "tool_calls": [
+            {"name": tc.name, "args": tc.args, "output": tc.output} for tc in tool_calls
+        ],
     }
 
     out_path = _pending_dir(cwd) / f"{adapter_tag}__{session_id}__{uuid.uuid4()}.json"

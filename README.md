@@ -163,6 +163,8 @@ python test_auto_agent_detection.py # automatic detection, zero manual config - 
 python test_otel_telemetry_source.py # real OTLP receiver, both protobuf (official classes) and JSON encodings
 python test_otel_real_payload_shape.py # message parsing against the CONFIRMED real Copilot payload shape
 python test_attestation_generation.py # Sprint 3: attestation generation against real git + real Copilot data
+python test_tool_call_extraction.py   # Sprint 3 Day 2: tool call parsing, against real Copilot transcript data
+python test_tool_calls_end_to_end.py  # Sprint 3 Day 2: full pipeline, hook subprocess -> attestation
 ```
 
 ## Using the active-adapter gate
@@ -297,14 +299,12 @@ setting at all.
       follow the proposal's Section 4.3 list (developer intent, prompt
       lineage, agent identity, execution environment, tool invocations,
       retrieved context, human review status, policy compliance flags).
-      Honesty notes inline in the code: `tool_invocations` is REAL for
-      `otel_genai` (confirmed live data), empty `[]` for git/hooks (they
-      genuinely don't expose tool data yet). `retrieved_context`,
-      `human_review_status`, `policy_compliance_flags` are explicit
-      placeholders, not guessed at - `retrieved_context` needs a way to
-      distinguish RAG calls from other tool calls (not built yet),
-      `human_review_status` needs a review workflow (future/dashboard
-      scope), `policy_compliance_flags` is explicitly Sprint 8 scope.
+      `retrieved_context`, `human_review_status`, `policy_compliance_flags`
+      are explicit placeholders, not guessed at - `retrieved_context`
+      needs a way to distinguish RAG calls from other tool calls (not
+      built yet), `human_review_status` needs a review workflow
+      (future/dashboard scope), `policy_compliance_flags` is explicitly
+      Sprint 8 scope.
 - [x] `generate_attestation()` (`attestation/generator.py`) -
       `NormalizedEvent -> ContextualAttestation`, fully automatic, no
       manual entry. This is the actual Sprint 3 deliverable: Sprint 1's
@@ -325,8 +325,55 @@ setting at all.
       starts the real receiver, listens for the given duration (default
       60s), and auto-attests every GenAI span that arrives via the
       `CaptureManager` callback - no polling loop needed.
+- [x] **Bug found and fixed:** `test_git_adapter.py` (written Day 1,
+      before the attestation schema existed) was also writing into
+      `.agentguard/attestations/`, using an ad-hoc shape with no
+      `attestation_id` field. Running it polluted the real attestation
+      store and crashed `agentguard.py list`. Fixed at the root: that
+      script no longer writes there at all (it only validates the
+      capture pipeline now - `auto-capture` is the real attestation path).
+      `list_attestations()` also hardened to skip malformed/foreign files
+      gracefully instead of crashing, regardless of cause.
+
+### Day 2: real tool-call data in `tool_invocations`
+
+- [x] `tool_invocations` is now REAL for both hook adapters, not just
+      `otel_genai`. `capture/copilot_hooks/transcript_parser.py::extract_tool_calls`
+      is built against a **real** transcript excerpt (the actual events.jsonl
+      content from live debugging, 2026-08-04) - `assistant.message`
+      events carry `data.toolRequests`, `tool.execution_complete` events
+      carry the matching `data.result`, paired by `toolCallId`. Confirmed
+      field names, not inferred.
+      `capture/claude_code_hooks/transcript_parser.py::extract_tool_calls`
+      is built against the documented/assumed content-block shape
+      (`{"type": "tool_use", ...}`) - **explicitly flagged unconfirmed**,
+      same standing caveat as the rest of Claude Code's transcript
+      parsing in this project (never live-tested). Output pairing isn't
+      implemented there since the result-shape was never confirmed either
+      - args are captured, `output` is always `None` for Claude Code
+      until that gap is closed with real data.
+- [x] `hook_shared.handle_stop()` takes an optional `tool_call_extractor`
+      parameter; `hook_adapter_base.py` reads `tool_calls` back out when
+      reconstructing a `CaptureEvent`, backward compatible with any
+      pending-capture file written before this change (defaults to `[]`
+      via `.get()`, doesn't crash on old files missing the field).
+- [x] **Full pipeline proven, not just the isolated function** -
+      `test_tool_calls_end_to_end.py` runs a real hook subprocess round
+      trip (including a real tool call in the transcript) through to
+      `ContextualAttestation.tool_invocations`, confirming the data
+      survives every hop: hook subprocess -> pending capture file ->
+      `CopilotHookAdapter.capture()` -> `CaptureEvent.tool_calls` ->
+      `NormalizedEvent.tool_invocations` -> attestation.
+      (`test_tool_call_extraction.py` covers the parser functions in
+      isolation, against the same real Copilot data.)
 
 ## Next: Sprint 4 (Cryptographic Signing & Verification)
+
+- Sprint 3, Day 3+ (optional, not done): `retrieved_context` distinction,
+  fuller `prompt_lineage` (system context, injected tool outputs beyond
+  just the current prompt), and confirming Claude Code's tool-call output
+  pairing against a real live session (closing the one remaining
+  unconfirmed gap in Day 2's work).
 
 - [x] ~~Fold adapters into `agentguard.py`~~ - DONE, see `auto-capture`/`otel-listen` above.
 - [x] ~~Validate `OtelGenAiTelemetrySource` against real traffic~~ - DONE, see live validation finding above.

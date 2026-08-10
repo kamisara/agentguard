@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Union
 
 from .interfaces import BaseAdapter
-from .types import CaptureEvent
+from .types import CaptureEvent, ToolCall
 
 
 class FileBridgedHookAdapter(BaseAdapter):
@@ -57,6 +57,15 @@ class FileBridgedHookAdapter(BaseAdapter):
         oldest = files[0]
         data = json.loads(oldest.read_text())
 
+        # Sprint 3, Day 2: tool_calls is a new field. .get() with a
+        # default keeps this backward compatible with completed-capture
+        # files written before this change (e.g. any left over from
+        # earlier sessions) - they simply have no tool calls, not a crash.
+        tool_calls = [
+            ToolCall(name=tc.get("name", "unknown"), args=tc.get("args", {}), output=tc.get("output"))
+            for tc in data.get("tool_calls", [])
+        ]
+
         event = CaptureEvent(
             adapter=self.adapter_tag,
             timestamp=datetime.fromisoformat(data["captured_at"]),
@@ -64,6 +73,7 @@ class FileBridgedHookAdapter(BaseAdapter):
             response=data["response"],
             session_id=data["session_id"],
             developer=None,
+            tool_calls=tool_calls,
             metadata={"cwd": data["cwd"], "source_file": str(oldest)},
         )
 
