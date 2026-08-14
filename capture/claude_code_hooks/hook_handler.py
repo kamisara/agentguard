@@ -16,6 +16,7 @@ from capture.hook_shared import handle_user_prompt_submit, handle_stop
 from capture.claude_code_hooks.transcript_parser import (
     extract_last_assistant_message,
     transcript_looks_like_claude_code,
+    extract_tool_calls,
 )
 
 ADAPTER_TAG = "claude_code_hook"
@@ -33,6 +34,7 @@ def main() -> None:
             ADAPTER_TAG,
             extract_last_assistant_message,
             transcript_looks_like_claude_code,
+            extract_tool_calls,
         )
     # Silently ignore any other event - this script should only be
     # registered against these two, but being defensive costs nothing.

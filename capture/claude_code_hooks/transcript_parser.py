@@ -12,6 +12,8 @@ text.
 import json
 from pathlib import Path
 
+from ..types import ToolCall
+
 
 def extract_last_assistant_message(transcript_path: str) -> str:
     """Returns "" if the file is missing or no assistant turn is found,
@@ -51,6 +53,56 @@ def extract_last_assistant_message(transcript_path: str) -> str:
                     last_text = "\n".join(text_parts)
 
     return last_text
+
+
+def extract_tool_calls(transcript_path: str) -> list:
+    """Sprint 3, Day 2.
+
+    NOT CONFIRMED against a real live Claude Code session - same standing
+    caveat as extract_last_assistant_message above (no live Claude Code
+    test has been done in this project; the Copilot equivalent of this
+    function IS confirmed, from real data - see
+    copilot_hooks/transcript_parser.py for the contrast).
+
+    Built against the documented/assumed content-block shape: an
+    assistant message's content can be a list of blocks including
+    {"type": "tool_use", "name": ..., "input": ...}. Output/result pairing
+    is NOT implemented - the shape of a corresponding tool_result entry
+    was never confirmed either, so args are captured but output is always
+    None here rather than guessed at. If live testing shows a different
+    shape (the way it did for Copilot), only this function needs fixing -
+    same isolation pattern used throughout this project.
+    """
+    path = Path(transcript_path)
+    if not path.exists():
+        return []
+
+    tool_calls = []
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            if entry.get("type") != "assistant":
+                continue
+            content = entry.get("message", {}).get("content", "")
+            if not isinstance(content, list):
+                continue
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "tool_use":
+                    tool_calls.append(
+                        ToolCall(
+                            name=block.get("name", "unknown"),
+                            args=block.get("input") or {},
+                            output=None,  # unconfirmed pairing, see docstring
+                        )
+                    )
+    return tool_calls
 
 
 def transcript_looks_like_claude_code(transcript_path: str) -> bool:
