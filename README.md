@@ -165,6 +165,7 @@ python test_otel_real_payload_shape.py # message parsing against the CONFIRMED r
 python test_attestation_generation.py # Sprint 3: attestation generation against real git + real Copilot data
 python test_tool_call_extraction.py   # Sprint 3 Day 2: tool call parsing, against real Copilot transcript data
 python test_tool_calls_end_to_end.py  # Sprint 3 Day 2: full pipeline, hook subprocess -> attestation
+python test_attestation_classification.py # Sprint 3 Day 3: retrieved_context/tool_invocations split, prompt_lineage
 ```
 
 ## Using the active-adapter gate
@@ -367,13 +368,37 @@ setting at all.
       (`test_tool_call_extraction.py` covers the parser functions in
       isolation, against the same real Copilot data.)
 
+### Day 3: `retrieved_context` and `prompt_lineage`, both real now
+
+- [x] `retrieved_context` vs `tool_invocations` split by a NAME-PATTERN
+      HEURISTIC (`attestation/generator.py::_is_retrieval_tool`) - tool
+      calls whose name contains `view`/`read`/`search`/`grep`/`list`/
+      `glob`/`fetch`/`get` land in `retrieved_context`; everything else
+      stays in `tool_invocations`. **Stated honestly as a heuristic, not
+      a confirmed signal** - no transcript from any agent tested so far
+      carries an explicit "this was retrieval" field. Both directions
+      tested (`test_attestation_classification.py`): a retrieval call
+      (`view`, using real Copilot data) and a non-retrieval call (`edit`)
+      both land where expected, plus a mixed batch.
+      `test_tool_calls_end_to_end.py` updated accordingly - `view` now
+      correctly lands in `retrieved_context`, not `tool_invocations`
+      (this was the fix working, not a regression).
+- [x] `prompt_lineage` - a `{"role", "content"}` list. Includes a
+      `system` entry ONLY when the source adapter actually captured one
+      (currently: `otel_genai`, via the confirmed
+      `gen_ai.system_instructions` attribute), plus the user prompt.
+      Hook-sourced events get a user-only lineage - stated honestly,
+      hooks don't capture system prompt content at all right now.
+      **Still partial**: doesn't yet include injected tool outputs
+      mid-chain (the proposal's fuller definition) - that needs
+      multi-turn conversation tracking this project doesn't do yet.
+
 ## Next: Sprint 4 (Cryptographic Signing & Verification)
 
-- Sprint 3, Day 3+ (optional, not done): `retrieved_context` distinction,
-  fuller `prompt_lineage` (system context, injected tool outputs beyond
-  just the current prompt), and confirming Claude Code's tool-call output
-  pairing against a real live session (closing the one remaining
-  unconfirmed gap in Day 2's work).
+- Remaining honest gap: confirming Claude Code's tool-call output pairing
+  against a real live session - the one standing "unconfirmed" flag left
+  from Day 2/3, since Claude Code has never been live-tested in this
+  project the way Copilot has (twice now: hooks and OTel).
 
 - [x] ~~Fold adapters into `agentguard.py`~~ - DONE, see `auto-capture`/`otel-listen` above.
 - [x] ~~Validate `OtelGenAiTelemetrySource` against real traffic~~ - DONE, see live validation finding above.

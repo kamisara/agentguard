@@ -95,15 +95,28 @@ def main():
     assert len(normalized.tool_invocations) == 1
     print(f"NormalizedEvent.tool_invocations: {normalized.tool_invocations}")
 
-    print("\n=== Step 4: generate_attestation -> ContextualAttestation.tool_invocations ===")
+    print("\n=== Step 4: generate_attestation -> retrieved_context / tool_invocations ===")
     attestation = generate_attestation(normalized)
-    assert len(attestation.tool_invocations) == 1
-    tool_inv = attestation.tool_invocations[0]
-    assert tool_inv["name"] == "view"
-    assert tool_inv["args"] == {"path": "capture/copilot_hook_adapter.py"}
-    print(f"ContextualAttestation.tool_invocations: {attestation.tool_invocations}")
+    # Sprint 3, Day 3: tool calls are now classified by name-pattern
+    # heuristic. "view" matches the retrieval pattern, so it lands in
+    # retrieved_context, not tool_invocations - this is the CORRECT
+    # updated behavior, not a regression (see attestation/generator.py
+    # _is_retrieval_tool).
+    assert len(attestation.tool_invocations) == 0, (
+        f"expected 0 (view should be classified as retrieval), got "
+        f"{len(attestation.tool_invocations)}"
+    )
+    assert len(attestation.retrieved_context) == 1, (
+        f"expected 1 retrieval entry, got {len(attestation.retrieved_context)}"
+    )
+    retrieval_entry = attestation.retrieved_context[0]
+    assert retrieval_entry["name"] == "view"
+    assert retrieval_entry["args"] == {"path": "capture/copilot_hook_adapter.py"}
+    print(f"ContextualAttestation.retrieved_context: {attestation.retrieved_context}")
+    print(f"ContextualAttestation.tool_invocations:  {attestation.tool_invocations} (empty - correct, 'view' is a read)")
 
-    print("\nPASS: tool call data survives the full real pipeline, end to end.")
+    print("\nPASS: tool call data survives the full real pipeline, end to end,")
+    print("      AND is correctly classified as retrieval vs. action.")
 
 
 if __name__ == "__main__":

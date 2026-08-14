@@ -39,6 +39,20 @@ class ContextualAttestation:
     prompt: str
     ai_output_summary: str
 
+    prompt_lineage: list  # Sprint 3, Day 3. PARTIAL, stated honestly: a
+                            # list of {"role", "content"} entries. Includes
+                            # a system entry ONLY when the source adapter
+                            # captured one (currently: otel_genai via
+                            # gen_ai.system_instructions - confirmed
+                            # attribute name, real when present) plus the
+                            # developer's prompt as a user entry. Does NOT
+                            # yet include injected tool outputs mid-chain
+                            # (the proposal's fuller definition) - that
+                            # needs multi-turn conversation tracking this
+                            # project doesn't do yet. Hook adapters never
+                            # populate a system entry - they don't capture
+                            # system prompt content at all right now.
+
     agent_identity: dict  # {model, adapter} - provider is None unless an
                            # adapter populates it; no current adapter does
 
@@ -50,19 +64,32 @@ class ContextualAttestation:
                                    # in every record; add when a real
                                    # source exists.
 
-    tool_invocations: list  # REAL when adapter="otel_genai" (see
-                              # otel_genai_parser._extract_tool_calls,
-                              # confirmed against live Copilot data,
-                              # 2026-08-09). Empty [] for git/hook adapters
-                              # - they genuinely don't expose tool call
-                              # data through the mechanisms built so far.
+    tool_invocations: list  # REAL for otel_genai (confirmed live data,
+                              # 2026-08-09) and both hook adapters
+                              # (Copilot: confirmed live data, 2026-08-04;
+                              # Claude Code: unconfirmed assumed shape,
+                              # never live-tested). Sprint 3 Day 3: now
+                              # split from retrieved_context by a NAME-
+                              # PATTERN HEURISTIC (see generator.py
+                              # _is_retrieval_tool) - no adapter or
+                              # transcript exposes an explicit "this was a
+                              # retrieval call" flag, so this is a guess
+                              # based on tool naming conventions, not a
+                              # confirmed signal. Genuinely empty [] for
+                              # git (no tool concept at all).
 
-    retrieved_context: list  # PLACEHOLDER. No adapter currently
-                               # distinguishes retrieval/RAG calls from
-                               # other tool calls. Deliberately empty, not
-                               # guessed at - a real implementation needs
-                               # a way to identify which tool_invocations
-                               # were retrieval operations specifically.
+    retrieved_context: list  # Sprint 3, Day 3: REAL, not a placeholder
+                               # anymore - tool calls whose name matches a
+                               # read/retrieval pattern (view, read,
+                               # search, grep, list, glob, fetch, get) are
+                               # classified here instead of
+                               # tool_invocations. STATED HONESTLY: this
+                               # is a naming heuristic, not a confirmed
+                               # semantic signal - no transcript from any
+                               # agent tested so far includes an explicit
+                               # "is this a retrieval operation" field.
+                               # Could misclassify a tool literally named
+                               # e.g. "read_and_delete_file".
 
     human_review_status: dict  # PLACEHOLDER. {"reviewed": False,
                                  # "reviewer": None} always, for every
