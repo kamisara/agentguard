@@ -166,6 +166,7 @@ python test_attestation_generation.py # Sprint 3: attestation generation against
 python test_tool_call_extraction.py   # Sprint 3 Day 2: tool call parsing, against real Copilot transcript data
 python test_tool_calls_end_to_end.py  # Sprint 3 Day 2: full pipeline, hook subprocess -> attestation
 python test_attestation_classification.py # Sprint 3 Day 3: retrieved_context/tool_invocations split, prompt_lineage
+python test_signing.py                # Sprint 4: signing, tamper detection, wrong-key rejection, real git pipeline
 ```
 
 ## Using the active-adapter gate
@@ -393,12 +394,97 @@ setting at all.
       mid-chain (the proposal's fuller definition) - that needs
       multi-turn conversation tracking this project doesn't do yet.
 
-## Next: Sprint 4 (Cryptographic Signing & Verification)
+## Sprint 4, Day 1: Cryptographic Signing & Verification
 
-- Remaining honest gap: confirming Claude Code's tool-call output pairing
-  against a real live session - the one standing "unconfirmed" flag left
-  from Day 2/3, since Claude Code has never been live-tested in this
-  project the way Copilot has (twice now: hooks and OTel).
+**Scoping decision, stated upfront:** the proposal allows two paths -
+Sigstore's keyless flow (Fulcio-issued short-lived certs tied to an OIDC
+identity, logged to the public Rekor transparency log) or self-hosted key
+infrastructure. This sprint implements the **self-hosted** path - real
+Ed25519 asymmetric cryptography (the `cryptography` package), fully
+testable locally with no network calls, browser OIDC flow, or external
+Sigstore infrastructure. Keyless signing is a real, documented future
+extension (see "Next" below), not silently skipped or faked.
+
+- [x] `signing/keys.py` - Ed25519 keypair generation, stored PEM-encoded
+      in `.agentguard/keys/`. `get_or_create_keypair()` generates on first
+      use; `generate_keypair()` (explicit, separate function) overwrites -
+      deliberately not the default path, so nobody silently invalidates
+      every existing signature by accident.
+- [x] `signing/signer.py` - signs over **canonical JSON**
+      (`sort_keys=True, separators=(",", ":")`), not raw text - the same
+      logical content can serialize to different bytes depending on key
+      order/whitespace, which would produce false "tampered" verdicts
+      that have nothing to do with actual tampering. Detached signature
+      pattern: a sibling `<id>.sig` file, not embedded in the attestation
+      JSON - keeps the attestation file's shape unchanged for anything
+      that already reads it (agentguard.py list/show, every existing
+      test).
+- [x] `attestation/store.py::write_and_sign_attestation()` - composes
+      writing + signing. `write_attestation()` (unsigned) still exists
+      standalone, matching the proposal's own architecture table, which
+      lists "Contextual Attestation generation" and "Cosign signing" as
+      distinct sub-steps.
+- [x] `agentguard.py auto-capture` / `otel-listen` now sign by default -
+      a real pipeline shouldn't require a separate manual step to
+      remember. New commands: `verify <id>`, `verify-all`.
+- [x] **The actual point of signing, proven, not assumed:**
+      `test_signing.py` signs an attestation, verifies it's valid,
+      **tampers with the content, and confirms verification now fails** -
+      both in-memory and by editing a real file on disk after signing.
+      Also confirms verifying against the wrong public key is rejected.
+      Manually re-confirmed against the real CLI: tampered a real signed
+      attestation file, ran `verify-all`, got `✘ INVALID`
+      (`signature does NOT match content`) - and confirmed unsigned
+      records (Sprint 1's manual `capture`) are reported separately as
+      `— UNSIGNED`, not silently skipped or crashed on.
+      Full pipeline also tested against a real git commit capture, not
+      just synthetic data.
+
+## Next: Sprint 4, Day 2+ / Sprint 5
+
+**Real bug found and fixed via live testing (2026-08-16):** the original
+`verify_signature_file()` trusted the `public_key_path` recorded inside
+the `.sig` file at signing time - an ABSOLUTE path from wherever signing
+happened. This broke immediately on a real machine: a `.sig` generated in
+one environment (this sandbox) and shipped inside the delivery zip had a
+recorded path like `/home/claude/inspect/agentguard/.agentguard/keys/...`,
+meaningless on Windows. `verify-all` correctly reported these as
+`✘ INVALID` - not silently wrong, but not useful either, since the
+signatures were never actually tampered with.
+
+**Fixed properly, not patched around:** `verify_signature_file()` now
+derives the key location from the standard directory convention
+(`.agentguard/keys/` as a sibling of `.agentguard/attestations/`,
+computed relative to the attestation file's own current location) BEFORE
+falling back to the recorded path. This means verification only depends
+on `.agentguard/keys/` and `.agentguard/attestations/` staying together -
+true as long as both move as part of the same directory, which they
+always do. The recorded path in the `.sig` file is now just informational,
+not load-bearing.
+
+**Proven, not assumed:** `test_portable_across_machines()` deliberately
+corrupts the recorded path to a nonexistent location and confirms
+verification still succeeds via the standard-location lookup. Beyond the
+unit test, manually reproduced the exact real scenario - copied the whole
+project to a different absolute path (`/tmp/simulated_different_machine`)
+and confirmed `verify-all` still reports `✔ VALID` for attestations signed
+at the original path.
+
+
+- Sigstore keyless signing (Fulcio/Rekor) as a documented future
+  extension - needs OIDC browser login and network calls to public
+  Sigstore infrastructure, genuinely different testing requirements than
+  everything else in this project so far.
+- Key rotation / multi-key trust (currently: one keypair, generated once,
+  used for everything - fine for a solo dev prototype, not for a real
+  multi-contributor deployment).
+- Remaining honest gap from Sprint 3: confirming Claude Code's tool-call
+  output pairing against a real live session - the one standing
+  "unconfirmed" flag left from Day 2/3, since Claude Code has never been
+  live-tested in this project the way Copilot has (twice now: hooks and
+  OTel).
+- Sprint 5 per the original plan: Git Integration (attestations tied to
+  specific commits, likely via git notes or a similar mechanism).
 
 - [x] ~~Fold adapters into `agentguard.py`~~ - DONE, see `auto-capture`/`otel-listen` above.
 - [x] ~~Validate `OtelGenAiTelemetrySource` against real traffic~~ - DONE, see live validation finding above.

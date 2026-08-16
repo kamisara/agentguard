@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
 """
-AgentGuard - Sprint 3: Automatic Attestation Generation
+AgentGuard - Sprint 4: Cryptographic Signing & Verification
 
-Sprint 1's `capture` command asked the developer to type everything in by
-hand. `auto-capture` replaces that: pulls a real CaptureEvent from one of
-the Sprint 2B adapters (git/claude_code_hook/copilot_hook), normalizes it,
-and generates a ContextualAttestation automatically - no manual entry.
+Sprint 3 made attestation generation automatic. Sprint 4 makes it
+tamper-evident: every attestation from auto-capture/otel-listen is now
+signed with a local Ed25519 keypair (self-hosted key infrastructure per
+the proposal's explicit alternative to Sigstore's keyless flow - see
+signing/keys.py for why keyless isn't implemented yet).
 
 Usage:
     python agentguard.py capture                 # Sprint 1: manual entry (still works)
-    python agentguard.py auto-capture <source>    # Sprint 3: automatic, source = git|claude_code_hook|copilot_hook
-    python agentguard.py otel-listen [seconds]    # Sprint 3: listen for real OTel spans, default 60s
+    python agentguard.py auto-capture <source>    # Sprint 3+4: automatic capture, signed
+    python agentguard.py otel-listen [seconds]    # Sprint 3+4: listen for real OTel spans, signed
     python agentguard.py list                     # list all recorded attestations (both schemas)
     python agentguard.py show <id>                # print one attestation in full
+    python agentguard.py verify <id>               # Sprint 4: verify an attestation's signature
+    python agentguard.py verify-all                # Sprint 4: verify every signed attestation
 """
 
 import json
@@ -114,13 +117,17 @@ def auto_capture(source: str):
     """Sprint 3: pull a real event from an adapter, normalize, generate
     and store an attestation automatically. Replaces manual typing for
     the sources that support pull-based capture (git, the two hook
-    adapters). OTel is push-based - see otel_listen() instead."""
+    adapters). OTel is push-based - see otel_listen() instead.
+
+    Sprint 4: also signs the attestation by default - a real capture
+    pipeline should produce tamper-evident output without a separate
+    manual step to remember."""
     from capture.git_adapter import GitAdapter
     from capture.claude_code_hook_adapter import ClaudeCodeHookAdapter
     from capture.copilot_hook_adapter import CopilotHookAdapter
     from capture.normalizer import normalize
     from attestation.generator import generate_attestation
-    from attestation.store import write_attestation
+    from attestation.store import write_and_sign_attestation
 
     adapters = {
         "git": GitAdapter(),
@@ -142,24 +149,29 @@ def auto_capture(source: str):
     event = adapter.capture()
     normalized = normalize(event)
     attestation = generate_attestation(normalized)
-    out_path = write_attestation(attestation)
+    out_path, sig_path = write_and_sign_attestation(attestation)
 
     print(f"✔ Attestation generated automatically from '{source}' -> {out_path}")
+    print(f"  signed -> {sig_path}")
     print(f"  intent_source: {attestation.intent_source}")
     print(f"  developer_intent: {attestation.developer_intent[:80]}")
     if attestation.tool_invocations:
         print(f"  tool_invocations: {len(attestation.tool_invocations)}")
+    if attestation.retrieved_context:
+        print(f"  retrieved_context: {len(attestation.retrieved_context)}")
 
 
 def otel_listen(seconds: int = 60):
     """Sprint 3: OTel is push-based (subscribe, not pull), so this starts
     the real receiver, listens for the given duration, and automatically
     attests every GenAI span that arrives - no manual entry, and no
-    polling loop needed since CaptureManager's callback fires per event."""
+    polling loop needed since CaptureManager's callback fires per event.
+
+    Sprint 4: also signs each attestation, same as auto_capture()."""
     from capture.otel_telemetry_source import OtelGenAiTelemetrySource
     from capture.normalizer import normalize
     from attestation.generator import generate_attestation
-    from attestation.store import write_attestation
+    from attestation.store import write_and_sign_attestation
 
     count = 0
 
@@ -167,9 +179,9 @@ def otel_listen(seconds: int = 60):
         nonlocal count
         normalized = normalize(event)
         attestation = generate_attestation(normalized)
-        out_path = write_attestation(attestation)
+        out_path, sig_path = write_and_sign_attestation(attestation)
         count += 1
-        print(f"✔ [{count}] Attestation from otel_genai -> {out_path}")
+        print(f"✔ [{count}] Attestation from otel_genai -> {out_path} (signed)")
         print(f"    developer_intent: {attestation.developer_intent[:80]}")
 
     source = OtelGenAiTelemetrySource()
@@ -182,7 +194,64 @@ def otel_listen(seconds: int = 60):
         pass
     finally:
         source.stop()
-    print(f"\nStopped. {count} attestation(s) generated automatically this session.")
+    print(f"\nStopped. {count} attestation(s) generated and signed automatically this session.")
+
+
+def verify(attestation_id: str):
+    """Sprint 4: verify one attestation's signature. Reports WHY it
+    failed if it did - missing sig file (never signed, e.g. anything from
+    Sprint 1's manual `capture` or Sprint 3 before signing existed),
+    tampered content, or wrong/missing key."""
+    from signing.signer import verify_signature_file
+
+    _ensure_dir()
+    matches = list(ATTESTATION_DIR.glob(f"{attestation_id}*.json"))
+    if not matches:
+        print(f"No attestation found matching id: {attestation_id}")
+        return
+
+    result = verify_signature_file(matches[0])
+    status = "✔ VALID" if result["valid"] else "✘ INVALID"
+    print(f"{status}: {matches[0].name}")
+    print(f"  {result['reason']}")
+    if result.get("algorithm"):
+        print(f"  algorithm: {result['algorithm']}")
+        print(f"  public key: {result['public_key_path']}")
+
+
+def verify_all():
+    """Sprint 4: verify every attestation that has a .sig file.
+    Attestations without one (unsigned - e.g. sprint1-v0 manual records,
+    or anything written with write_attestation() instead of
+    write_and_sign_attestation()) are reported separately, not silently
+    skipped - a verification tool should account for everything it sees."""
+    from signing.signer import verify_signature_file, sig_path_for
+
+    _ensure_dir()
+    files = sorted(ATTESTATION_DIR.glob("*.json"))
+    if not files:
+        print("No attestations recorded yet.")
+        return
+
+    valid_count = 0
+    invalid_count = 0
+    unsigned_count = 0
+
+    for f in files:
+        if not sig_path_for(f).exists():
+            unsigned_count += 1
+            print(f"— UNSIGNED: {f.name}")
+            continue
+        result = verify_signature_file(f)
+        if result["valid"]:
+            valid_count += 1
+            print(f"✔ VALID:   {f.name}")
+        else:
+            invalid_count += 1
+            print(f"✘ INVALID: {f.name}  ({result['reason']})")
+
+    print(f"\n{valid_count} valid, {invalid_count} invalid, {unsigned_count} unsigned "
+          f"(out of {len(files)} total)")
 
 
 def main():
@@ -202,6 +271,10 @@ def main():
         list_attestations()
     elif cmd == "show" and len(sys.argv) >= 3:
         show(sys.argv[2])
+    elif cmd == "verify" and len(sys.argv) >= 3:
+        verify(sys.argv[2])
+    elif cmd == "verify-all":
+        verify_all()
     else:
         print(__doc__)
 
