@@ -1,11 +1,16 @@
-# AgentGuard capture layer dependencies
+# AgentGuard dependencies
 #
-# opentelemetry-proto is the ONLY external dependency in the whole capture
-# layer, deliberately - everything else uses stdlib only. Needed for
-# capture/otlp_protobuf_parser.py to decode real OTLP protobuf (the
+# opentelemetry-proto: capture layer, decodes real OTLP protobuf (the
 # default encoding almost every OTel exporter, including VS Code Copilot's
 # native emission, uses).
+#
+# cryptography: attestation layer (Sprint 4), Ed25519 signing/verification
+# of attestation records - self-hosted key infrastructure, see
+# signing/keys.py for why this instead of Sigstore's keyless flow.
+#
+# Everything else in this project is stdlib-only, deliberately.
 #
 # Install with: pip install -r requirements.txt
 
 opentelemetry-proto>=1.44.0
+cryptography>=41.0.0

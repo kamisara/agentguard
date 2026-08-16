@@ -30,6 +30,30 @@ def write_attestation(
     return out_path
 
 
+def write_and_sign_attestation(
+    attestation: ContextualAttestation, repo_path: Union[str, Path, None] = None
+) -> tuple:
+    """Writes the attestation, then signs it - two files, the plain JSON
+    (unchanged shape, still readable by anything reading unsigned records)
+    plus a detached .sig file. Signing is intentionally a separate step
+    from writing, not baked into write_attestation() - matches the
+    proposal's own architecture table, which lists "Contextual Attestation
+    generation" and "Cosign signing" as distinct sub-steps of the
+    Attestation layer, and keeps write_attestation() usable standalone for
+    anything that doesn't need/want signing (e.g. quick local testing).
+
+    Returns (attestation_path, signature_path)."""
+    from signing.keys import get_or_create_keypair
+    from signing.signer import write_signature
+
+    attestation_path = write_attestation(attestation, repo_path)
+    private_key_path, public_key_path = get_or_create_keypair(repo_path)
+    sig_path = write_signature(
+        attestation_path, attestation.to_dict(), private_key_path, public_key_path
+    )
+    return attestation_path, sig_path
+
+
 def list_attestation_files(repo_path: Union[str, Path, None] = None) -> List[Path]:
     return sorted(_attestation_dir(repo_path).glob("*.json"))
 
