@@ -6,7 +6,15 @@
 #
 # cryptography: attestation layer (Sprint 4), Ed25519 signing/verification
 # of attestation records - self-hosted key infrastructure, see
-# signing/keys.py for why this instead of Sigstore's keyless flow.
+# signing/keys.py.
+#
+# sigstore: attestation layer (Sprint 4, Day 2), Sigstore keyless signing -
+# identity-bound, publicly logged to Rekor. Needs real internet access to
+# Sigstore's public infrastructure and an interactive browser OIDC login -
+# see signing/sigstore_signer.py for a confirmed real limitation: this
+# fails with a clear, caught error (not a crash) on networks that block
+# Sigstore's endpoints, which happened during this project's own
+# development sandbox.
 #
 # Everything else in this project is stdlib-only, deliberately.
 #
@@ -14,3 +22,4 @@
 
 opentelemetry-proto>=1.44.0
 cryptography>=41.0.0
+sigstore>=3.0.0
