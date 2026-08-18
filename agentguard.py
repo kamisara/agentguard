@@ -2,20 +2,24 @@
 """
 AgentGuard - Sprint 4: Cryptographic Signing & Verification
 
-Sprint 3 made attestation generation automatic. Sprint 4 makes it
-tamper-evident: every attestation from auto-capture/otel-listen is now
-signed with a local Ed25519 keypair (self-hosted key infrastructure per
-the proposal's explicit alternative to Sigstore's keyless flow - see
-signing/keys.py for why keyless isn't implemented yet).
+Two signing methods, per the proposal's "Sigstore/Cosign, with support for
+self-hosted key infrastructure" line:
+  - Local Ed25519 keypair (self-hosted) - automatic, on every
+    auto-capture/otel-listen. Proves "whoever holds this key signed this".
+  - Sigstore keyless (identity-bound, publicly logged to Rekor) - opt-in,
+    since it needs an interactive browser OIDC login. Proves a specific
+    real identity signed this, and it's publicly auditable.
 
 Usage:
     python agentguard.py capture                 # Sprint 1: manual entry (still works)
-    python agentguard.py auto-capture <source>    # Sprint 3+4: automatic capture, signed
-    python agentguard.py otel-listen [seconds]    # Sprint 3+4: listen for real OTel spans, signed
+    python agentguard.py auto-capture <source>    # Sprint 3+4: automatic capture, signed (local key)
+    python agentguard.py otel-listen [seconds]    # Sprint 3+4: listen for real OTel spans, signed (local key)
     python agentguard.py list                     # list all recorded attestations (both schemas)
     python agentguard.py show <id>                # print one attestation in full
-    python agentguard.py verify <id>               # Sprint 4: verify an attestation's signature
-    python agentguard.py verify-all                # Sprint 4: verify every signed attestation
+    python agentguard.py verify <id>               # verify local-key signature
+    python agentguard.py verify-all                # verify every local-key-signed attestation
+    python agentguard.py sign-keyless <id> <identity> # Sigstore keyless sign (opens browser)
+    python agentguard.py verify-keyless <id> <identity> # Sigstore keyless verify
 """
 
 import json
@@ -254,6 +258,65 @@ def verify_all():
           f"(out of {len(files)} total)")
 
 
+def sign_keyless(attestation_id: str, expected_identity: str):
+    """Sprint 4, Day 2: Sigstore keyless signing. Opens a browser for
+    OIDC login - this is NOT automatic like local-key signing, by design
+    (see agentguard.py's module docstring for why).
+
+    Wrapped to catch the specific failure mode CONFIRMED via direct
+    testing during development: on a network that blocks Sigstore's
+    infrastructure (this happened in the sandbox this was built in - a
+    real, not hypothetical, scenario also plausible on restricted
+    corporate networks), even constructing the trust config fails with a
+    TUFError. Catching this here means the person running it gets a
+    clear explanation, not a raw traceback."""
+    from signing.sigstore_signer import sign_attestation_file_keyless
+
+    _ensure_dir()
+    matches = list(ATTESTATION_DIR.glob(f"{attestation_id}*.json"))
+    if not matches:
+        print(f"No attestation found matching id: {attestation_id}")
+        return
+
+    print("Opening browser for Sigstore OIDC login...")
+    try:
+        bundle_path = sign_attestation_file_keyless(matches[0])
+    except Exception as e:
+        print(f"✘ Keyless signing failed: {type(e).__name__}: {e}")
+        print(
+            "  If this says something about TUF metadata or a network "
+            "error, Sigstore's infrastructure (fulcio.sigstore.dev, "
+            "rekor.sigstore.dev, oauth2.sigstore.dev, tuf.sigstore.dev) "
+            "is likely blocked on this network - confirmed to happen on "
+            "some restricted/corporate networks, not just a bug."
+        )
+        return
+
+    print(f"✔ Keyless-signed -> {bundle_path}")
+    print(f"  Identity used for verification: {expected_identity}")
+
+
+def verify_keyless(attestation_id: str, expected_identity: str):
+    from signing.sigstore_signer import verify_attestation_file_keyless
+
+    _ensure_dir()
+    matches = list(ATTESTATION_DIR.glob(f"{attestation_id}*.json"))
+    if not matches:
+        print(f"No attestation found matching id: {attestation_id}")
+        return
+
+    try:
+        result = verify_attestation_file_keyless(matches[0], expected_identity)
+    except Exception as e:
+        print(f"✘ Keyless verification failed: {type(e).__name__}: {e}")
+        print("  (Same possible network cause as sign-keyless - see its output.)")
+        return
+
+    status = "✔ VALID" if result["valid"] else "✘ INVALID"
+    print(f"{status}: {matches[0].name}")
+    print(f"  {result['reason']}")
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__)
@@ -275,6 +338,10 @@ def main():
         verify(sys.argv[2])
     elif cmd == "verify-all":
         verify_all()
+    elif cmd == "sign-keyless" and len(sys.argv) >= 4:
+        sign_keyless(sys.argv[2], sys.argv[3])
+    elif cmd == "verify-keyless" and len(sys.argv) >= 4:
+        verify_keyless(sys.argv[2], sys.argv[3])
     else:
         print(__doc__)
 

@@ -166,7 +166,8 @@ python test_attestation_generation.py # Sprint 3: attestation generation against
 python test_tool_call_extraction.py   # Sprint 3 Day 2: tool call parsing, against real Copilot transcript data
 python test_tool_calls_end_to_end.py  # Sprint 3 Day 2: full pipeline, hook subprocess -> attestation
 python test_attestation_classification.py # Sprint 3 Day 3: retrieved_context/tool_invocations split, prompt_lineage
-python test_signing.py                # Sprint 4: signing, tamper detection, wrong-key rejection, real git pipeline
+python test_signing.py                # Sprint 4 Day 1: local-key signing, tamper detection, wrong-key rejection, portability
+python test_sigstore_keyless.py       # Sprint 4 Day 2: Sigstore keyless module - imports/naming/error-handling only, see docstring
 ```
 
 ## Using the active-adapter gate
@@ -440,7 +441,7 @@ extension (see "Next" below), not silently skipped or faked.
       Full pipeline also tested against a real git commit capture, not
       just synthetic data.
 
-## Next: Sprint 4, Day 2+ / Sprint 5
+## Sprint 4, Day 1 bugfix (portability)
 
 **Real bug found and fixed via live testing (2026-08-16):** the original
 `verify_signature_file()` trusted the `public_key_path` recorded inside
@@ -471,13 +472,62 @@ and confirmed `verify-all` still reports `✔ VALID` for attestations signed
 at the original path.
 
 
-- Sigstore keyless signing (Fulcio/Rekor) as a documented future
-  extension - needs OIDC browser login and network calls to public
-  Sigstore infrastructure, genuinely different testing requirements than
-  everything else in this project so far.
-- Key rotation / multi-key trust (currently: one keypair, generated once,
-  used for everything - fine for a solo dev prototype, not for a real
-  multi-contributor deployment).
+## Sprint 4, Day 2: Sigstore keyless signing
+
+Two signing methods now exist, per the proposal's "Sigstore/Cosign, with
+support for self-hosted key infrastructure" line - Day 1 built self-hosted
+(local Ed25519 keys), Day 2 adds keyless.
+
+**Real code, real (installed) API - honestly bounded by what could
+actually be executed here.** `signing/sigstore_signer.py` uses the actual
+`sigstore` Python package's real API, confirmed via runtime inspection of
+the installed version (`sigstore==4.5.0`) rather than assumed from
+memory - this library's public surface has changed across versions
+(`SigningContext.production()` doesn't exist in this version; the real
+path is `ClientTrustConfig.production()` + `SigningContext.from_trust_config()`),
+and guessing wrong here would repeat the exact class of bug this project
+has already hit and fixed twice (Copilot's transcript format, OTel's
+message shape).
+
+**What could NOT be executed in this environment, confirmed by directly
+trying, not assumed:**
+- A direct connection attempt to Fulcio (`fulcio.sigstore.dev`) returned
+  HTTP 403 - blocked by network policy, not a DNS/timeout issue.
+- Even `Verifier.production()` / `ClientTrustConfig.production()` alone
+  (before any signing/verification happens) fails with `TUFError: Failed
+  to refresh TUF metadata` - the trust-root fetch itself is blocked too.
+- Keyless signing also requires an interactive browser OIDC login
+  (`Issuer.identity_token()` blocks and opens a browser) - not something
+  that can run headlessly in any sandbox, by design, since the whole
+  point is binding to a real interactively-verified identity.
+
+**What WAS tested here, safely** (`test_sigstore_keyless.py`): module
+imports against the real API, the `.sigstore.json` bundle naming
+convention (matches standard cosign/sigstore tooling), and that a missing
+bundle fails with a clear message rather than crashing. The CLI commands
+(`sign-keyless`/`verify-keyless`) also catch the confirmed real
+TUF/network failure mode and print an actionable explanation instead of a
+raw traceback - manually tested against the actual blocked network in
+this environment, not simulated.
+
+**To actually test keyless signing for real**, on a machine with normal
+internet access (not this restricted sandbox):
+```powershell
+python agentguard.py auto-capture git
+python agentguard.py sign-keyless <attestation-id> your-email@example.com
+```
+This opens a browser for an OIDC login (GitHub/Google/Microsoft). After
+completing it, a `<id>.sigstore.json` bundle appears next to the
+attestation. Then:
+```powershell
+python agentguard.py verify-keyless <attestation-id> your-email@example.com
+```
+
+## Next: Sprint 4, Day 3+ / Sprint 5
+
+- Key rotation / multi-key trust for the local-key path (currently: one
+  keypair, generated once, used for everything - fine for a solo dev
+  prototype, not for a real multi-contributor deployment).
 - Remaining honest gap from Sprint 3: confirming Claude Code's tool-call
   output pairing against a real live session - the one standing
   "unconfirmed" flag left from Day 2/3, since Claude Code has never been
