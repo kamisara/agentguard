@@ -168,6 +168,7 @@ python test_tool_calls_end_to_end.py  # Sprint 3 Day 2: full pipeline, hook subp
 python test_attestation_classification.py # Sprint 3 Day 3: retrieved_context/tool_invocations split, prompt_lineage
 python test_signing.py                # Sprint 4 Day 1: local-key signing, tamper detection, wrong-key rejection, portability
 python test_sigstore_keyless.py       # Sprint 4 Day 2: Sigstore keyless module - imports/naming/error-handling only, see docstring
+python test_git_notes.py              # Sprint 5 Day 1: git notes, against this repo's real commits
 ```
 
 ## Using the active-adapter gate
@@ -472,7 +473,20 @@ and confirmed `verify-all` still reports `✔ VALID` for attestations signed
 at the original path.
 
 
-## Sprint 4, Day 2: Sigstore keyless signing
+## Sprint 4, Day 2: Sigstore keyless signing — CONFIRMED WORKING LIVE
+
+**Update (2026-08-18):** confirmed end-to-end on a real machine (home
+network, no VPN/corporate firewall). Real browser OIDC login, real
+Fulcio-issued certificate bound to a real identity, real Rekor
+transparency log entry, real verification - all successful. The real
+blocker turned out to be a **Windows-specific bug**, not network
+access - `os.symlink()` failing with `OSError: [WinError 1314]` inside
+the `tuf` library's trust-root cache management, requiring Developer Mode
+(or Administrator) to fix. Full root-cause writeup, including how the
+initial "network blocked" theory was corrected with real evidence:
+`docs/finding-sigstore-windows-symlink.md`.
+
+
 
 Two signing methods now exist, per the proposal's "Sigstore/Cosign, with
 support for self-hosted key infrastructure" line - Day 1 built self-hosted
@@ -523,44 +537,50 @@ attestation. Then:
 python agentguard.py verify-keyless <attestation-id> your-email@example.com
 ```
 
-## Next: Sprint 4, Day 3+ / Sprint 5
+## Sprint 5, Day 1: Git Integration
 
-- Key rotation / multi-key trust for the local-key path (currently: one
-  keypair, generated once, used for everything - fine for a solo dev
-  prototype, not for a real multi-contributor deployment).
+- [x] `git_integration/notes.py` - attaches attestation references to a
+      specific commit via `git notes --ref=refs/notes/agentguard`
+      (a dedicated ref, doesn't collide with git's default notes usage).
+      Uses `git notes append`, not `add` - multiple AI-assisted edits
+      before one commit is a real case, and append doesn't overwrite a
+      prior entry. Each reference stored as one JSON line, so multiple
+      entries stay individually parseable.
+- [x] `agentguard.py auto-capture git` now automatically attaches a note
+      to the exact commit it captured from - no separate manual step.
+      Hook/OTel-sourced attestations deliberately do NOT get this (they
+      aren't tied to one specific commit - may span several, or none
+      committed yet), so this only fires for `source == "git"`, not
+      silently applied everywhere.
+- [x] New command: `agentguard.py git-note-show <commit>` - looks up and
+      prints every attestation attached to a given commit.
+- [x] **Tested against real commits in this repo**, not a mock repo:
+      attach + retrieve, multiple attestations on the same commit
+      (append behavior), a commit with genuinely no note (returns `[]`,
+      not an error - the normal case for any commit not made through
+      AgentGuard), and the full pipeline through `agentguard.py`'s real
+      `auto_capture()` function, not just the notes module in isolation
+      (`test_git_notes.py`).
+
+## Next: Sprint 5, Day 2+ / Sprint 6
+
+- Sprint 5 per the original plan also mentions in-toto layout
+  integration more broadly (AI generation steps as first-class in-toto
+  link types) - git notes is the commit-attachment half; a full in-toto
+  layout/link-type mapping is still open.
+- Key rotation / multi-key trust for the local-key signing path
+  (currently: one keypair, generated once, used for everything - fine
+  for a solo dev prototype, not a real multi-contributor deployment).
 - Remaining honest gap from Sprint 3: confirming Claude Code's tool-call
   output pairing against a real live session - the one standing
   "unconfirmed" flag left from Day 2/3, since Claude Code has never been
-  live-tested in this project the way Copilot has (twice now: hooks and
-  OTel).
-- Sprint 5 per the original plan: Git Integration (attestations tied to
-  specific commits, likely via git notes or a similar mechanism).
-
-- [x] ~~Fold adapters into `agentguard.py`~~ - DONE, see `auto-capture`/`otel-listen` above.
-- [x] ~~Validate `OtelGenAiTelemetrySource` against real traffic~~ - DONE, see live validation finding above.
-- Real `DebugAdapter` (log/chat-view scraping) stays deferred - lowest
-  priority now that two real Tier 2 adapters and one real Telemetry
-  Source exist, all validated against live data.
-- Sprint 4: sign `ContextualAttestation` records with Cosign/Sigstore per
-  the original proposal. `attestation/store.py` writes plain JSON right
-  now - signing wraps that, doesn't replace it.
-- Update proposal Section 4.2 with the Tier 1 -> Tier 2 finding AND the
-  "Tier 2 is a property of the agent harness, not the model" framing -
-  add an Agent x Tier coverage matrix (Claude Code: Tier 2 real, Copilot:
-  Tier 2 real AND Telemetry Source real (native OTel emission, validated
-  live) - both verified against live sessions/data, Codex CLI/Windsurf:
-  unconfirmed, Qwen/Mistral: depends on harness, not applicable directly).
-- Worth several lines in the evaluation/methodology section now: THREE
-  confirmed "assumption tested and corrected via live debugging" findings
-  exist (`docs/finding-lm-api-tier1.md`, `docs/finding-copilot-transcript-format.md`,
-  `docs/finding-otel-live-validation.md`) - a real, citable pattern for
-  the design science research writeup, not a one-off. The GenAI semantic
-  convention instability (Development-status, no 1.0 release) is worth a
-  line too - a real methodological risk for anyone building on it right
-  now, not just this project.
-- `retrieved_context` in the attestation schema needs a real way to
-  distinguish RAG/retrieval tool calls from other tool calls before it
-  can be populated - currently an honest placeholder, not guessed at.
+  live-tested in this project the way Copilot has (hooks, OTel, and now
+  Sigstore keyless signing).
+- `retrieved_context` in the attestation schema still uses a naming
+  heuristic (Sprint 3 Day 3), not a confirmed semantic signal - worth
+  revisiting if a real transcript ever exposes an explicit
+  retrieval-vs-action field.
+- Sprint 6 per the original plan: CI/CD Enforcement.
 
 ## Design notes worth remembering
 

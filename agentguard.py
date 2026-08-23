@@ -1,18 +1,16 @@
 #!/usr/bin/env python3
 """
-AgentGuard - Sprint 4: Cryptographic Signing & Verification
+AgentGuard - Sprint 5: Git Integration
 
-Two signing methods, per the proposal's "Sigstore/Cosign, with support for
-self-hosted key infrastructure" line:
-  - Local Ed25519 keypair (self-hosted) - automatic, on every
-    auto-capture/otel-listen. Proves "whoever holds this key signed this".
-  - Sigstore keyless (identity-bound, publicly logged to Rekor) - opt-in,
-    since it needs an interactive browser OIDC login. Proves a specific
-    real identity signed this, and it's publicly auditable.
+Sprint 4 made attestations tamper-evident. Sprint 5 ties them to specific
+commits using `git notes` - a real, standard git mechanism that attaches
+metadata to a commit without altering its hash. This is what makes an
+AI generation event a first-class, discoverable part of a commit's
+provenance record, per the proposal's in-toto integration goal.
 
 Usage:
     python agentguard.py capture                 # Sprint 1: manual entry (still works)
-    python agentguard.py auto-capture <source>    # Sprint 3+4: automatic capture, signed (local key)
+    python agentguard.py auto-capture <source>    # Sprint 3+4+5: automatic capture, signed, git-noted (for git source)
     python agentguard.py otel-listen [seconds]    # Sprint 3+4: listen for real OTel spans, signed (local key)
     python agentguard.py list                     # list all recorded attestations (both schemas)
     python agentguard.py show <id>                # print one attestation in full
@@ -20,6 +18,7 @@ Usage:
     python agentguard.py verify-all                # verify every local-key-signed attestation
     python agentguard.py sign-keyless <id> <identity> # Sigstore keyless sign (opens browser)
     python agentguard.py verify-keyless <id> <identity> # Sigstore keyless verify
+    python agentguard.py git-note-show <commit>    # Sprint 5: show attestations attached to a commit
 """
 
 import json
@@ -125,7 +124,14 @@ def auto_capture(source: str):
 
     Sprint 4: also signs the attestation by default - a real capture
     pipeline should produce tamper-evident output without a separate
-    manual step to remember."""
+    manual step to remember.
+
+    Sprint 5: when source="git", also attaches a git note referencing
+    this attestation onto the exact commit it came from - see
+    git_integration/notes.py. Only git has a real commit to attach to;
+    hook/OTel-sourced attestations aren't tied to one specific commit
+    (they may span edits across several, or none yet committed) so this
+    step is skipped for those, not silently faked."""
     from capture.git_adapter import GitAdapter
     from capture.claude_code_hook_adapter import ClaudeCodeHookAdapter
     from capture.copilot_hook_adapter import CopilotHookAdapter
@@ -163,6 +169,16 @@ def auto_capture(source: str):
         print(f"  tool_invocations: {len(attestation.tool_invocations)}")
     if attestation.retrieved_context:
         print(f"  retrieved_context: {len(attestation.retrieved_context)}")
+
+    if source == "git":
+        commit_hash = attestation.metadata.get("commit_hash")
+        if commit_hash:
+            from git_integration.notes import attach_attestation_note
+            try:
+                attach_attestation_note(commit_hash, attestation.attestation_id, out_path)
+                print(f"  git note attached -> commit {commit_hash[:12]}")
+            except RuntimeError as e:
+                print(f"  ⚠ could not attach git note: {e}")
 
 
 def otel_listen(seconds: int = 60):
@@ -317,6 +333,23 @@ def verify_keyless(attestation_id: str, expected_identity: str):
     print(f"  {result['reason']}")
 
 
+def git_note_show(commit_hash: str):
+    """Sprint 5: shows every attestation attached to a given commit via
+    git notes. Real lookup, not a guess - reads the actual
+    refs/notes/agentguard ref."""
+    from git_integration.notes import get_attestations_for_commit
+
+    entries = get_attestations_for_commit(commit_hash)
+    if not entries:
+        print(f"No attestations attached to commit {commit_hash}")
+        print("(This is normal for any commit not made through 'agentguard.py auto-capture git'.)")
+        return
+
+    print(f"Commit {commit_hash} has {len(entries)} attached attestation(s):")
+    for entry in entries:
+        print(f"  {entry.get('attestation_id')}  ->  {entry.get('attestation_path')}")
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__)
@@ -342,6 +375,8 @@ def main():
         sign_keyless(sys.argv[2], sys.argv[3])
     elif cmd == "verify-keyless" and len(sys.argv) >= 4:
         verify_keyless(sys.argv[2], sys.argv[3])
+    elif cmd == "git-note-show" and len(sys.argv) >= 3:
+        git_note_show(sys.argv[2])
     else:
         print(__doc__)
 
