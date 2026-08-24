@@ -2,15 +2,17 @@
 """
 AgentGuard - Sprint 5: Git Integration
 
-Sprint 4 made attestations tamper-evident. Sprint 5 ties them to specific
-commits using `git notes` - a real, standard git mechanism that attaches
-metadata to a commit without altering its hash. This is what makes an
-AI generation event a first-class, discoverable part of a commit's
-provenance record, per the proposal's in-toto integration goal.
+Day 1 tied attestations to specific commits via `git notes`. Day 2 goes
+further: real in-toto v1 Statements, DSSE-signed, with the commit as the
+Statement's subject (digest: gitCommit) - this is the actual concrete
+implementation of the proposal's "AI generation steps appear as
+first-class links in the software supply chain" goal, using the real
+in-toto Attestation Framework spec (Statement shape, DSSE envelope, PAE
+signing), not an invented format.
 
 Usage:
     python agentguard.py capture                 # Sprint 1: manual entry (still works)
-    python agentguard.py auto-capture <source>    # Sprint 3+4+5: automatic capture, signed, git-noted (for git source)
+    python agentguard.py auto-capture <source>    # Sprint 3+4+5: automatic capture, signed, git-noted + in-toto (for git source)
     python agentguard.py otel-listen [seconds]    # Sprint 3+4: listen for real OTel spans, signed (local key)
     python agentguard.py list                     # list all recorded attestations (both schemas)
     python agentguard.py show <id>                # print one attestation in full
@@ -18,7 +20,8 @@ Usage:
     python agentguard.py verify-all                # verify every local-key-signed attestation
     python agentguard.py sign-keyless <id> <identity> # Sigstore keyless sign (opens browser)
     python agentguard.py verify-keyless <id> <identity> # Sigstore keyless verify
-    python agentguard.py git-note-show <commit>    # Sprint 5: show attestations attached to a commit
+    python agentguard.py git-note-show <commit>    # Sprint 5 Day 1: show attestations attached to a commit
+    python agentguard.py show-intoto <id>          # Sprint 5 Day 2: decode + verify the in-toto Statement/DSSE envelope
 """
 
 import json
@@ -179,6 +182,17 @@ def auto_capture(source: str):
                 print(f"  git note attached -> commit {commit_hash[:12]}")
             except RuntimeError as e:
                 print(f"  ⚠ could not attach git note: {e}")
+
+            from git_integration.in_toto import write_intoto_attestation
+            from signing.keys import get_or_create_keypair
+            try:
+                private_key_path, _ = get_or_create_keypair()
+                intoto_path = write_intoto_attestation(
+                    out_path, attestation.to_dict(), commit_hash, private_key_path
+                )
+                print(f"  in-toto Statement -> {intoto_path}")
+            except Exception as e:
+                print(f"  ⚠ could not write in-toto Statement: {type(e).__name__}: {e}")
 
 
 def otel_listen(seconds: int = 60):
@@ -350,6 +364,24 @@ def git_note_show(commit_hash: str):
         print(f"  {entry.get('attestation_id')}  ->  {entry.get('attestation_path')}")
 
 
+def show_intoto(attestation_id: str):
+    """Sprint 5, Day 2: decode and print a real in-toto Statement + DSSE
+    envelope, verifying the signature first."""
+    from git_integration.in_toto import verify_intoto_attestation
+
+    _ensure_dir()
+    matches = list(ATTESTATION_DIR.glob(f"{attestation_id}*.json"))
+    if not matches:
+        print(f"No attestation found matching id: {attestation_id}")
+        return
+
+    result = verify_intoto_attestation(matches[0])
+    status = "✔ VALID" if result["valid"] else "✘ INVALID"
+    print(f"{status}: {result['reason']}")
+    if result["statement"]:
+        print(json.dumps(result["statement"], indent=2))
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__)
@@ -377,6 +409,8 @@ def main():
         verify_keyless(sys.argv[2], sys.argv[3])
     elif cmd == "git-note-show" and len(sys.argv) >= 3:
         git_note_show(sys.argv[2])
+    elif cmd == "show-intoto" and len(sys.argv) >= 3:
+        show_intoto(sys.argv[2])
     else:
         print(__doc__)
 
