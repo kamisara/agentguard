@@ -169,6 +169,7 @@ python test_attestation_classification.py # Sprint 3 Day 3: retrieved_context/to
 python test_signing.py                # Sprint 4 Day 1: local-key signing, tamper detection, wrong-key rejection, portability
 python test_sigstore_keyless.py       # Sprint 4 Day 2: Sigstore keyless module - imports/naming/error-handling only, see docstring
 python test_git_notes.py              # Sprint 5 Day 1: git notes, against this repo's real commits
+python test_intoto_dsse.py            # Sprint 5 Day 2: real in-toto Statement + DSSE, PAE signing, tamper detection
 ```
 
 ## Using the active-adapter gate
@@ -562,24 +563,78 @@ python agentguard.py verify-keyless <attestation-id> your-email@example.com
       `auto_capture()` function, not just the notes module in isolation
       (`test_git_notes.py`).
 
-## Next: Sprint 5, Day 2+ / Sprint 6
+## Sprint 5, Day 2: real in-toto Statement + DSSE envelope
 
-- Sprint 5 per the original plan also mentions in-toto layout
-  integration more broadly (AI generation steps as first-class in-toto
-  link types) - git notes is the commit-attachment half; a full in-toto
-  layout/link-type mapping is still open.
+Deepens Day 1's git-notes attachment with the actual concrete
+implementation of "AI generation steps as first-class in-toto link
+types" - real in-toto v1 Statements, real DSSE signing, not an invented
+format.
+
+- [x] `git_integration/dsse.py` - real DSSE (Dead Simple Signing
+      Envelope). Critically, signs the **PAE** (Pre-Authentication
+      Encoding: `"DSSEv1" SP LEN(type) SP type SP LEN(body) SP body`) -
+      NOT the raw payload bytes. This distinction matters: signing raw
+      bytes would still "work" against our own verifier but produce a
+      non-interoperable signature that would fail against any real
+      in-toto/DSSE tooling (cosign, in-toto's own verifier). Spec details
+      confirmed via the in-toto Attestation Framework's own docs and real
+      published examples, not assumed.
+- [x] `git_integration/in_toto.py::build_statement()` - real Statement
+      shape (`_type`, `subject` with `digest.gitCommit`, `predicateType`,
+      `predicate`). The commit is the Statement's **subject** - the
+      thing being attested about - with the actual real commit hash as
+      its digest, not a placeholder.
+      `predicateType` is a custom AgentGuard URI
+      (`https://agentguard.dev/ContextualAttestation/v1`) - the
+      spec-sanctioned way to attest custom data; in-toto consumers are
+      expected to ignore predicate types they don't recognize rather
+      than reject them.
+- [x] File convention: `<attestation_id>.intoto.jsonl`, matching real
+      in-toto/SLSA tooling (slsa-verifier, `cosign attest`) rather than
+      inventing a different extension.
+- [x] `agentguard.py auto-capture git` now writes the in-toto Statement
+      automatically, alongside the plain attestation, its local-key
+      signature, and the git note - all from one command. New command:
+      `show-intoto <id>` decodes and verifies it.
+- [x] **A real arithmetic bug caught and fixed before it shipped**: the
+      first draft of the PAE test hand-counted the byte length of
+      `"application/vnd.in-toto+json"` as 29; the actual length is 28.
+      Verified with `len()` directly rather than trusting the hand count,
+      caught the discrepancy, fixed the test. Small, but a genuine
+      instance of the project's "verify, don't just assert" discipline
+      catching a real mistake before it could mask a future bug.
+- [x] **A test-honesty correction, same discipline**: an early draft of
+      the payloadType test was titled/framed as testing "what PAE
+      protects against", but `verify_envelope()`'s explicit upfront
+      type-equality check is what actually catches that case, not PAE's
+      cryptographic binding (which was never exercised differently by
+      that test as originally written). Renamed and re-documented the
+      test to claim only what it actually demonstrates.
+- [x] **Full pipeline tested against a real commit**, not synthetic data
+      - real `GitAdapter` capture, real attestation, real Statement with
+      the real commit hash as `subject.digest.gitCommit`, real DSSE
+      signature, verified (`test_intoto_dsse.py`). Also manually
+      confirmed via the actual CLI: `auto-capture git` followed by
+      `show-intoto`, producing a correctly-verified, fully-populated
+      Statement.
+
+## Next: Sprint 6
+
+- Sprint 5 remaining scope: a fuller in-toto **layout** (not just
+  per-commit Statements) would tie multiple attestations together into a
+  supply-chain-wide provenance graph - out of scope for now, Day 1+2
+  cover per-commit attestation binding, which is the more immediately
+  useful piece.
 - Key rotation / multi-key trust for the local-key signing path
   (currently: one keypair, generated once, used for everything - fine
   for a solo dev prototype, not a real multi-contributor deployment).
 - Remaining honest gap from Sprint 3: confirming Claude Code's tool-call
   output pairing against a real live session - the one standing
-  "unconfirmed" flag left from Day 2/3, since Claude Code has never been
-  live-tested in this project the way Copilot has (hooks, OTel, and now
-  Sigstore keyless signing).
+  "unconfirmed" flag, since Claude Code has never been live-tested in
+  this project the way Copilot has (hooks, OTel, Sigstore keyless
+  signing).
 - `retrieved_context` in the attestation schema still uses a naming
-  heuristic (Sprint 3 Day 3), not a confirmed semantic signal - worth
-  revisiting if a real transcript ever exposes an explicit
-  retrieval-vs-action field.
+  heuristic (Sprint 3 Day 3), not a confirmed semantic signal.
 - Sprint 6 per the original plan: CI/CD Enforcement.
 
 ## Design notes worth remembering
