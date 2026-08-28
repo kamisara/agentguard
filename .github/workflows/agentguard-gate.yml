@@ -1,0 +1,48 @@
+name: AgentGuard Attestation Gate
+
+# HONEST NOTE: this workflow has been designed against confirmed real
+# GitHub Actions behavior (see comments below), but has NOT been executed
+# on a real GitHub Actions runner - this project's development sandbox
+# has no way to trigger one. The gate logic itself (ci_enforcement/gate.py)
+# IS fully tested locally, against real commits and real attestations
+# (test_ci_gate.py) - what's untested is specifically the YAML/runner
+# integration layer. Confirm this actually runs correctly the first time
+# it's used in a real repository.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  attestation-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history - notes reference commits by hash, need them locally
+
+      # CRITICAL, confirmed via research before writing this (not assumed):
+      # git notes live under refs/notes/*, a ref namespace SEPARATE from
+      # branches and tags. actions/checkout does not fetch this namespace
+      # at all, regardless of fetch-depth. Without this step, the gate
+      # would see "MISSING" on every single commit even if real
+      # attestation notes exist on the remote - a false negative that
+      # defeats the entire point of the gate, not a fail-safe.
+      - name: Fetch git notes (not fetched by actions/checkout by default)
+        run: git fetch origin 'refs/notes/*:refs/notes/*'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run AgentGuard attestation gate
+        # Day 1 scope: checks only the HEAD commit that triggered this
+        # workflow, not the full PR diff range - see ci_enforcement/gate.py
+        # for how to extend to a --base/--head range once PR-range
+        # resolution across push/pull_request event types is worth the
+        # added complexity.
+        run: python ci_enforcement/gate.py --head "${{ github.sha }}"
