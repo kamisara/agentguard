@@ -1,0 +1,36 @@
+{
+  "schema_version": "sprint3-v1",
+  "attestation_id": "dd780428-1b00-4caf-8d7a-8c56cef349f8",
+  "session_id": null,
+  "timestamp": "2026-08-20T09:16:02.820690+00:00",
+  "adapter": "git",
+  "developer_intent": "sprint 5 day 1: git notes integration",
+  "intent_source": "inferred",
+  "prompt": "sprint 5 day 1: git notes integration",
+  "ai_output_summary": "63 file(s) changed, +5942/-0",
+  "prompt_lineage": [
+    {
+      "role": "user",
+      "content": "sprint 5 day 1: git notes integration"
+    }
+  ],
+  "agent_identity": {
+    "model": null,
+    "adapter": "git"
+  },
+  "execution_environment": {
+    "session_id": null,
+    "event_timestamp": "2026-08-20T09:15:57+00:00"
+  },
+  "tool_invocations": [],
+  "retrieved_context": [],
+  "human_review_status": {
+    "reviewed": false,
+    "reviewer": null
+  },
+  "policy_compliance_flags": [],
+  "metadata": {
+    "commit_hash": "9d44f15a4fb9b09341c1c00deee30a4f4cac715f",
+    "diff_stat": "63 files changed, 5942 insertions(+)"
+  }
+}

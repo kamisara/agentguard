@@ -1,0 +1,36 @@
+{
+  "schema_version": "sprint3-v1",
+  "attestation_id": "9afc1006-3c36-49d5-aa00-a9446d49bcc5",
+  "session_id": null,
+  "timestamp": "2026-08-24T11:39:28.273426+00:00",
+  "adapter": "git",
+  "developer_intent": "sprint 5 day 2: real in-toto Statement + DSSE",
+  "intent_source": "inferred",
+  "prompt": "sprint 5 day 2: real in-toto Statement + DSSE",
+  "ai_output_summary": "66 file(s) changed, +6424/-0",
+  "prompt_lineage": [
+    {
+      "role": "user",
+      "content": "sprint 5 day 2: real in-toto Statement + DSSE"
+    }
+  ],
+  "agent_identity": {
+    "model": null,
+    "adapter": "git"
+  },
+  "execution_environment": {
+    "session_id": null,
+    "event_timestamp": "2026-08-24T11:39:22+00:00"
+  },
+  "tool_invocations": [],
+  "retrieved_context": [],
+  "human_review_status": {
+    "reviewed": false,
+    "reviewer": null
+  },
+  "policy_compliance_flags": [],
+  "metadata": {
+    "commit_hash": "f9c9262bd0c44d0dc454eec878a0a40533bd1c42",
+    "diff_stat": "66 files changed, 6424 insertions(+)"
+  }
+}

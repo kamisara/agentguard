@@ -1,0 +1,30 @@
+{
+  "schema_version": "sprint3-v1",
+  "attestation_id": "f9668461-9376-496f-9532-c732cb12c6e1",
+  "session_id": "a0dedf7f-06f7-4b09-bc3c-5a18d4ee5add",
+  "timestamp": "2026-08-10T11:22:10.511959+00:00",
+  "adapter": "copilot_hook",
+  "developer_intent": "Add a comment to .\\agentguard\\README.md saying #testestlolo",
+  "intent_source": "explicit",
+  "prompt": "Add a comment to .\\agentguard\\README.md saying #testestlolo",
+  "ai_output_summary": "Added the comment \"#testestlolo\" to the top of README.md.",
+  "agent_identity": {
+    "model": null,
+    "adapter": "copilot_hook"
+  },
+  "execution_environment": {
+    "session_id": "a0dedf7f-06f7-4b09-bc3c-5a18d4ee5add",
+    "event_timestamp": "2026-08-08T20:28:29.779786+00:00"
+  },
+  "tool_invocations": [],
+  "retrieved_context": [],
+  "human_review_status": {
+    "reviewed": false,
+    "reviewer": null
+  },
+  "policy_compliance_flags": [],
+  "metadata": {
+    "cwd": "D:\\code pfe 2\\agentguard",
+    "source_file": "/home/claude/inspect/agentguard/.agentguard/pending_captures/copilot_hook__a0dedf7f-06f7-4b09-bc3c-5a18d4ee5add__5354e9a2-6b17-45d9-ad09-f743ddc0aa19.json"
+  }
+}

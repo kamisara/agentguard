@@ -170,6 +170,7 @@ python test_signing.py                # Sprint 4 Day 1: local-key signing, tampe
 python test_sigstore_keyless.py       # Sprint 4 Day 2: Sigstore keyless module - imports/naming/error-handling only, see docstring
 python test_git_notes.py              # Sprint 5 Day 1: git notes, against this repo's real commits
 python test_intoto_dsse.py            # Sprint 5 Day 2: real in-toto Statement + DSSE, PAE signing, tamper detection
+python test_ci_gate.py                # Sprint 6 Day 1: CI gate against real commits - VALID/MISSING/INVALID, exit codes
 ```
 
 ## Using the active-adapter gate
@@ -618,24 +619,76 @@ format.
       `show-intoto`, producing a correctly-verified, fully-populated
       Statement.
 
-## Next: Sprint 6
+## Sprint 6, Day 1: CI/CD Enforcement
 
+The actual enforcement gate the proposal calls for: "a GitHub Actions /
+GitLab CI gate that verifies the presence, integrity, and policy
+compliance of contextual attestations before code progresses to build."
+Day 1 scope: presence + signature integrity. Policy rules are explicitly
+Sprint 8 scope, not faked here.
+
+- [x] `ci_enforcement/gate.py` - checks whether a commit (or range) has a
+      valid, signed attestation attached via git notes (Sprint 5).
+      `check_commit()` returns `VALID` / `MISSING` / `INVALID`;
+      `run_gate()` prints a report and returns an exit code (`0` = pass,
+      `1` = fail) - exactly the mechanism a real CI system uses to block
+      a merge or fail a job.
+- [x] **Real git gotcha, confirmed via research before writing the
+      workflow, not assumed:** `git notes` live under `refs/notes/*`, a
+      ref namespace completely separate from branches/tags.
+      `actions/checkout` does NOT fetch this namespace, even with
+      `fetch-depth: 0`. Missing this would make the gate silently report
+      `MISSING` on every single commit, even ones with real attestations
+      on the actual remote - a false negative that defeats the entire
+      point of the gate. `.github/workflows/agentguard-gate.yml` includes
+      the required explicit step:
+      `git fetch origin 'refs/notes/*:refs/notes/*'`.
+- [x] **A real bug caught by testing the actual invocation pattern, not
+      just importing the module in a test:** running
+      `python ci_enforcement/gate.py` directly (exactly how CI invokes
+      it) crashed with `ModuleNotFoundError: No module named
+      'git_integration'` - the script's own directory was on `sys.path`,
+      but not the project root, so sibling packages weren't importable.
+      `test_ci_gate.py`'s own tests didn't catch this, since they import
+      `ci_enforcement.gate` as a module from the project root, which
+      doesn't hit the same path issue. Fixed the same way
+      `claude_code_hooks/hook_handler.py` was fixed earlier in this
+      project: `sys.path.insert(0, ...)` at the top of the script.
+- [x] **Tested against real commits, all three outcomes**
+      (`test_ci_gate.py`): a commit with a real valid attestation
+      (`VALID`), a commit with none (`MISSING`), and a commit whose
+      attestation was tampered with on disk after signing (`INVALID`,
+      correctly caught) - plus confirming `run_gate()`'s exit codes
+      (`0`/`1`) behave exactly as a CI system would need. Also manually
+      re-confirmed via the actual command line, invoked the same way CI
+      does (`python ci_enforcement/gate.py --head HEAD`), both before and
+      after the sys.path fix.
+- [x] **Honest scope limit on the workflow YAML itself**: designed
+      against confirmed real GitHub Actions behavior, but this sandbox
+      has no way to trigger an actual GitHub Actions run - the gate
+      *logic* is fully tested locally (above), the YAML/runner
+      integration layer is not. Flagged directly in the workflow file's
+      own comments, not silently assumed correct.
+
+## Next: Sprint 6, Day 2+ / Sprint 7
+
+- Confirm `.github/workflows/agentguard-gate.yml` actually runs correctly
+  on a real GitHub Actions runner, in a real repository - the one thing
+  that couldn't be tested in this sandbox.
+- Day 1 only checks the single triggering commit
+  (`github.sha`); extending to a full PR diff range needs resolving
+  `base`/`head` differently across `push` vs `pull_request` events -
+  `ci_enforcement/gate.py`'s `--base`/`--head` args already support this,
+  just not wired into the workflow YAML yet.
 - Sprint 5 remaining scope: a fuller in-toto **layout** (not just
   per-commit Statements) would tie multiple attestations together into a
-  supply-chain-wide provenance graph - out of scope for now, Day 1+2
-  cover per-commit attestation binding, which is the more immediately
-  useful piece.
-- Key rotation / multi-key trust for the local-key signing path
-  (currently: one keypair, generated once, used for everything - fine
-  for a solo dev prototype, not a real multi-contributor deployment).
+  supply-chain-wide provenance graph.
+- Key rotation / multi-key trust for the local-key signing path.
 - Remaining honest gap from Sprint 3: confirming Claude Code's tool-call
-  output pairing against a real live session - the one standing
-  "unconfirmed" flag, since Claude Code has never been live-tested in
-  this project the way Copilot has (hooks, OTel, Sigstore keyless
-  signing).
+  output pairing against a real live session.
 - `retrieved_context` in the attestation schema still uses a naming
   heuristic (Sprint 3 Day 3), not a confirmed semantic signal.
-- Sprint 6 per the original plan: CI/CD Enforcement.
+- Sprint 7 per the original plan: Dashboard & Visualization.
 
 ## Design notes worth remembering
 
