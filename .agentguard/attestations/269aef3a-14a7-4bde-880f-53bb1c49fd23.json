@@ -1,0 +1,36 @@
+{
+  "schema_version": "sprint3-v1",
+  "attestation_id": "269aef3a-14a7-4bde-880f-53bb1c49fd23",
+  "session_id": null,
+  "timestamp": "2026-08-28T11:12:45.108652+00:00",
+  "adapter": "git",
+  "developer_intent": "broader in-toto layout integration final fix",
+  "intent_source": "inferred",
+  "prompt": "broader in-toto layout integration final fix",
+  "ai_output_summary": "5 file(s) changed, +501/-19",
+  "prompt_lineage": [
+    {
+      "role": "user",
+      "content": "broader in-toto layout integration final fix"
+    }
+  ],
+  "agent_identity": {
+    "model": null,
+    "adapter": "git"
+  },
+  "execution_environment": {
+    "session_id": null,
+    "event_timestamp": "2026-08-24T19:58:20+01:00"
+  },
+  "tool_invocations": [],
+  "retrieved_context": [],
+  "human_review_status": {
+    "reviewed": false,
+    "reviewer": null
+  },
+  "policy_compliance_flags": [],
+  "metadata": {
+    "commit_hash": "00d7ddeec154041ce5c3b297004252ef345f170c",
+    "diff_stat": "5 files changed, 501 insertions(+), 19 deletions(-)"
+  }
+}

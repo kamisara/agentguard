@@ -1,0 +1,36 @@
+{
+  "schema_version": "sprint3-v1",
+  "attestation_id": "c1340976-3339-4662-8946-bce98966b142",
+  "session_id": null,
+  "timestamp": "2026-08-15T13:55:24.367251+00:00",
+  "adapter": "git",
+  "developer_intent": "restore working state after sandbox reset",
+  "intent_source": "inferred",
+  "prompt": "restore working state after sandbox reset",
+  "ai_output_summary": "56 file(s) changed, +4829/-0",
+  "prompt_lineage": [
+    {
+      "role": "user",
+      "content": "restore working state after sandbox reset"
+    }
+  ],
+  "agent_identity": {
+    "model": null,
+    "adapter": "git"
+  },
+  "execution_environment": {
+    "session_id": null,
+    "event_timestamp": "2026-08-15T13:52:19+00:00"
+  },
+  "tool_invocations": [],
+  "retrieved_context": [],
+  "human_review_status": {
+    "reviewed": false,
+    "reviewer": null
+  },
+  "policy_compliance_flags": [],
+  "metadata": {
+    "commit_hash": "905caf68e90d5b45a9a9d89c6c7706d74857158b",
+    "diff_stat": "56 files changed, 4829 insertions(+)"
+  }
+}

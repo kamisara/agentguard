@@ -1,0 +1,36 @@
+{
+  "schema_version": "sprint3-v1",
+  "attestation_id": "a1d2805b-36b3-43a1-941b-beda6670ac5a",
+  "session_id": null,
+  "timestamp": "2026-08-28T11:18:45.101608+00:00",
+  "adapter": "git",
+  "developer_intent": "clean up range test file",
+  "intent_source": "inferred",
+  "prompt": "clean up range test file",
+  "ai_output_summary": "6 file(s) changed, +435/-14",
+  "prompt_lineage": [
+    {
+      "role": "user",
+      "content": "clean up range test file"
+    }
+  ],
+  "agent_identity": {
+    "model": null,
+    "adapter": "git"
+  },
+  "execution_environment": {
+    "session_id": null,
+    "event_timestamp": "2026-08-28T12:12:48+01:00"
+  },
+  "tool_invocations": [],
+  "retrieved_context": [],
+  "human_review_status": {
+    "reviewed": false,
+    "reviewer": null
+  },
+  "policy_compliance_flags": [],
+  "metadata": {
+    "commit_hash": "fb4a20b2ef734636800d1dd8cb2131f02f41f22e",
+    "diff_stat": "6 files changed, 435 insertions(+), 14 deletions(-)"
+  }
+}

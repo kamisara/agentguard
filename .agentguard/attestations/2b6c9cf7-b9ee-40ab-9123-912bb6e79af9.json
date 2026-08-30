@@ -1,0 +1,30 @@
+{
+  "schema_version": "sprint3-v1",
+  "attestation_id": "2b6c9cf7-b9ee-40ab-9123-912bb6e79af9",
+  "session_id": null,
+  "timestamp": "2026-08-10T11:37:51.567014+00:00",
+  "adapter": "git",
+  "developer_intent": "Sprint 3 Day 2: real tool-call extraction from hook transcripts",
+  "intent_source": "inferred",
+  "prompt": "Sprint 3 Day 2: real tool-call extraction from hook transcripts",
+  "ai_output_summary": "25 file(s) changed, +1263/-233",
+  "agent_identity": {
+    "model": null,
+    "adapter": "git"
+  },
+  "execution_environment": {
+    "session_id": null,
+    "event_timestamp": "2026-08-10T11:22:10+00:00"
+  },
+  "tool_invocations": [],
+  "retrieved_context": [],
+  "human_review_status": {
+    "reviewed": false,
+    "reviewer": null
+  },
+  "policy_compliance_flags": [],
+  "metadata": {
+    "commit_hash": "1079a137cfae8a0024612af97f38241c1163c3a2",
+    "diff_stat": "25 files changed, 1263 insertions(+), 233 deletions(-)"
+  }
+}

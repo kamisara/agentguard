@@ -1,0 +1,36 @@
+{
+  "schema_version": "sprint3-v1",
+  "attestation_id": "b89ccd90-b823-4591-878f-d13c62a8a196",
+  "session_id": null,
+  "timestamp": "2026-08-16T11:15:04.480017+00:00",
+  "adapter": "git",
+  "developer_intent": "init",
+  "intent_source": "inferred",
+  "prompt": "init",
+  "ai_output_summary": "57 file(s) changed, +5266/-0",
+  "prompt_lineage": [
+    {
+      "role": "user",
+      "content": "init"
+    }
+  ],
+  "agent_identity": {
+    "model": null,
+    "adapter": "git"
+  },
+  "execution_environment": {
+    "session_id": null,
+    "event_timestamp": "2026-08-16T11:15:04+00:00"
+  },
+  "tool_invocations": [],
+  "retrieved_context": [],
+  "human_review_status": {
+    "reviewed": false,
+    "reviewer": null
+  },
+  "policy_compliance_flags": [],
+  "metadata": {
+    "commit_hash": "c5b480ba69a1a2b9d75630f48e87528de0ec1a58",
+    "diff_stat": "57 files changed, 5266 insertions(+)"
+  }
+}

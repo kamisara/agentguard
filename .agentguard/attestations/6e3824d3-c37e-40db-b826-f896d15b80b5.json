@@ -1,0 +1,36 @@
+{
+  "schema_version": "sprint3-v1",
+  "attestation_id": "6e3824d3-c37e-40db-b826-f896d15b80b5",
+  "session_id": null,
+  "timestamp": "2026-08-18T08:26:16.454507+00:00",
+  "adapter": "git",
+  "developer_intent": "sprint 4 day 2",
+  "intent_source": "inferred",
+  "prompt": "sprint 4 day 2",
+  "ai_output_summary": "59 file(s) changed, +5605/-0",
+  "prompt_lineage": [
+    {
+      "role": "user",
+      "content": "sprint 4 day 2"
+    }
+  ],
+  "agent_identity": {
+    "model": null,
+    "adapter": "git"
+  },
+  "execution_environment": {
+    "session_id": null,
+    "event_timestamp": "2026-08-18T08:25:48+00:00"
+  },
+  "tool_invocations": [],
+  "retrieved_context": [],
+  "human_review_status": {
+    "reviewed": false,
+    "reviewer": null
+  },
+  "policy_compliance_flags": [],
+  "metadata": {
+    "commit_hash": "4f7cde9bafabba3b0ecc1a7b562a5886c78177a3",
+    "diff_stat": "59 files changed, 5605 insertions(+)"
+  }
+}
