@@ -1,4 +1,4 @@
-#testestlolo
+#testnumber99
 # agentguard — capture layer, Sprint 2B
 
 ## Status
@@ -663,18 +663,21 @@ Sprint 8 scope, not faked here.
       re-confirmed via the actual command line, invoked the same way CI
       does (`python ci_enforcement/gate.py --head HEAD`), both before and
       after the sys.path fix.
-- [x] **Honest scope limit on the workflow YAML itself**: designed
-      against confirmed real GitHub Actions behavior, but this sandbox
-      has no way to trigger an actual GitHub Actions run - the gate
-      *logic* is fully tested locally (above), the YAML/runner
-      integration layer is not. Flagged directly in the workflow file's
-      own comments, not silently assumed correct.
+- [x] **CONFIRMED WORKING on a real GitHub Actions runner (2026-08-28).**
+      The gap flagged above as untestable in this sandbox got closed for
+      real: pushed a commit with no attestation, the workflow ran on an
+      actual `ubuntu-latest` runner, `git fetch origin
+      'refs/notes/*:refs/notes/*'` worked, Python setup and dependency
+      install succeeded, and the gate correctly reported `MISSING` and
+      failed the job (`Process completed with exit code 1`) - exactly
+      correct behavior for a commit with no attestation. Confirmed the
+      passing case too: ran `auto-capture git` locally, pushed again, the
+      same workflow reported `VALID` / `GATE PASSED`. Both the gate
+      *logic* (tested locally, above) and the *YAML/runner integration*
+      (tested live, here) are now confirmed, not just designed-and-hoped.
 
 ## Next: Sprint 6, Day 2+ / Sprint 7
 
-- Confirm `.github/workflows/agentguard-gate.yml` actually runs correctly
-  on a real GitHub Actions runner, in a real repository - the one thing
-  that couldn't be tested in this sandbox.
 - Day 1 only checks the single triggering commit
   (`github.sha`); extending to a full PR diff range needs resolving
   `base`/`head` differently across `push` vs `pull_request` events -

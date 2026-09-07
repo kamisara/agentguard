@@ -37,6 +37,50 @@ def _cleanup_notes_ref(repo_path=None):
     )
 
 
+def test_relative_path_survives_different_machine():
+    print("=== Real bug found via live GitHub Actions testing: absolute paths ===")
+    print("=== in git notes don't survive a different machine/OS - fixed to  ===")
+    print("=== store relative paths, proven here by copying to a new location ===")
+    _cleanup_notes_ref()
+
+    adapter = GitAdapter()
+    event = adapter.capture()
+    normalized = normalize(event)
+    attestation = generate_attestation(normalized)
+    attestation_path, _ = write_and_sign_attestation(attestation)
+    commit_hash = _current_commit()
+
+    # This is what agentguard.py's auto_capture() now does - store a
+    # RELATIVE, posix-normalized path, not attestation_path's absolute form.
+    relative_path = Path(attestation_path).resolve().relative_to(Path.cwd().resolve())
+    note_path = relative_path.as_posix()
+    attach_attestation_note(commit_hash, attestation.attestation_id, note_path)
+
+    # Simulate a genuinely different machine: copy the whole repo
+    # (including .git, .agentguard/, and the notes ref) to a different
+    # absolute path and check the gate from there instead - this is
+    # exactly what a GitHub Actions runner is, from the repo's
+    # perspective: a fresh checkout at a path that has nothing to do
+    # with wherever the attestation was originally generated.
+    import shutil
+    import tempfile
+    sim_path = Path(tempfile.gettempdir()) / "agentguard_ci_gate_portability_test"
+    if sim_path.exists():
+        shutil.rmtree(sim_path)
+    shutil.copytree(Path.cwd(), sim_path)
+
+    result = check_commit(commit_hash, repo_path=sim_path)
+    assert result["status"] == "VALID", (
+        f"expected VALID from the copied location, got: {result}"
+    )
+    print(f"Signed at: {Path.cwd()}")
+    print(f"Verified from: {sim_path}")
+    print(f"Result: {result['status']}")
+
+    shutil.rmtree(sim_path)
+    print("PASS\n")
+
+
 def _current_commit() -> str:
     result = subprocess.run(
         ["git", "rev-parse", "HEAD"], capture_output=True, text=True
@@ -163,6 +207,7 @@ if __name__ == "__main__":
     test_missing_commit()
     test_tampered_attestation()
     test_gate_exit_codes()
+    test_relative_path_survives_different_machine()
     test_range_check_multiple_commits()
     _cleanup_notes_ref()
     print("CI gate tests passed.")

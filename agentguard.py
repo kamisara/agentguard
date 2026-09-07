@@ -178,7 +178,21 @@ def auto_capture(source: str):
         if commit_hash:
             from git_integration.notes import attach_attestation_note
             try:
-                attach_attestation_note(commit_hash, attestation.attestation_id, out_path)
+                # Store a path RELATIVE to the repo root, normalized to
+                # forward slashes - not out_path's absolute form. An
+                # absolute path (e.g. "D:\code pfe 2\agentguard\...")
+                # baked into a git note is meaningless the moment that
+                # note is read on a different machine or OS - a Linux CI
+                # runner checking out the exact same repo would have no
+                # such path at all. Relative paths resolve correctly
+                # against whatever directory the reader (gate.py,
+                # git_note_show) is actually running from - which is
+                # always the repo root, both locally and in CI. Same
+                # class of bug as the public-key path issue fixed earlier
+                # in signing/signer.py.
+                relative_path = Path(out_path).resolve().relative_to(Path.cwd().resolve())
+                note_path = relative_path.as_posix()
+                attach_attestation_note(commit_hash, attestation.attestation_id, note_path)
                 print(f"  git note attached -> commit {commit_hash[:12]}")
             except RuntimeError as e:
                 print(f"  ⚠ could not attach git note: {e}")

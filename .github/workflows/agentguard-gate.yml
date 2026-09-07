@@ -1,13 +1,11 @@
 name: AgentGuard Attestation Gate
 
-# HONEST NOTE: this workflow has been designed against confirmed real
-# GitHub Actions behavior (see comments below), but has NOT been executed
-# on a real GitHub Actions runner - this project's development sandbox
-# has no way to trigger one. The gate logic itself (ci_enforcement/gate.py)
-# IS fully tested locally, against real commits and real attestations
-# (test_ci_gate.py) - what's untested is specifically the YAML/runner
-# integration layer. Confirm this actually runs correctly the first time
-# it's used in a real repository.
+# CONFIRMED WORKING on a real GitHub Actions runner (2026-08-28): both
+# the fail case (commit with no attestation -> MISSING, exit 1) and the
+# pass case (commit with a real signed attestation -> VALID, exit 0) were
+# observed on an actual ubuntu-latest run, not just designed against
+# documented behavior. See README.md's Sprint 6 section for the full
+# writeup.
 
 on:
   pull_request:
