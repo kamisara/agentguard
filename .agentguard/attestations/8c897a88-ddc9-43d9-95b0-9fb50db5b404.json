@@ -1,0 +1,30 @@
+{
+  "schema_version": "sprint3-v1",
+  "attestation_id": "8c897a88-ddc9-43d9-95b0-9fb50db5b404",
+  "session_id": null,
+  "timestamp": "2026-08-09T18:59:48.182814+00:00",
+  "adapter": "git",
+  "developer_intent": "opentelemtry test",
+  "intent_source": "inferred",
+  "prompt": "opentelemtry test",
+  "ai_output_summary": "8 file(s) changed, +369/-97",
+  "agent_identity": {
+    "model": null,
+    "adapter": "git"
+  },
+  "execution_environment": {
+    "session_id": null,
+    "event_timestamp": "2026-08-08T21:32:20+01:00"
+  },
+  "tool_invocations": [],
+  "retrieved_context": [],
+  "human_review_status": {
+    "reviewed": false,
+    "reviewer": null
+  },
+  "policy_compliance_flags": [],
+  "metadata": {
+    "commit_hash": "364db5492688bc0d7e77ee5213d608ae49e72fd1",
+    "diff_stat": "8 files changed, 369 insertions(+), 97 deletions(-)"
+  }
+}

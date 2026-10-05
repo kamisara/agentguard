@@ -170,6 +170,7 @@ python test_signing.py                # Sprint 4 Day 1: local-key signing, tampe
 python test_sigstore_keyless.py       # Sprint 4 Day 2: Sigstore keyless module - imports/naming/error-handling only, see docstring
 python test_git_notes.py              # Sprint 5 Day 1: git notes, against this repo's real commits
 python test_intoto_dsse.py            # Sprint 5 Day 2: real in-toto Statement + DSSE, PAE signing, tamper detection
+python test_ci_gate.py                # Sprint 6: CI gate, self-contained notes - VALID/MISSING/INVALID, cross-machine proof
 ```
 
 ## Using the active-adapter gate
@@ -618,24 +619,123 @@ format.
       `show-intoto`, producing a correctly-verified, fully-populated
       Statement.
 
-## Next: Sprint 6
+## Sprint 6, Day 1: CI/CD Enforcement
 
+The actual enforcement gate the proposal calls for: "a GitHub Actions /
+GitLab CI gate that verifies the presence, integrity, and policy
+compliance of contextual attestations before code progresses to build."
+Day 1 scope: presence + signature integrity. Policy rules are explicitly
+Sprint 8 scope, not faked here.
+
+- [x] `ci_enforcement/gate.py` - checks whether a commit (or range) has a
+      valid, signed attestation attached via git notes (Sprint 5).
+      `check_commit()` returns `VALID` / `MISSING` / `INVALID`;
+      `run_gate()` prints a report and returns an exit code (`0` = pass,
+      `1` = fail) - exactly the mechanism a real CI system uses to block
+      a merge or fail a job.
+- [x] **Real git gotcha, confirmed via research before writing the
+      workflow, not assumed:** `git notes` live under `refs/notes/*`, a
+      ref namespace completely separate from branches/tags.
+      `actions/checkout` does NOT fetch this namespace, even with
+      `fetch-depth: 0`. Missing this would make the gate silently report
+      `MISSING` on every single commit, even ones with real attestations
+      on the actual remote - a false negative that defeats the entire
+      point of the gate. `.github/workflows/agentguard-gate.yml` includes
+      the required explicit step:
+      `git fetch origin 'refs/notes/*:refs/notes/*'`.
+- [x] **A real bug caught by testing the actual invocation pattern, not
+      just importing the module in a test:** running
+      `python ci_enforcement/gate.py` directly (exactly how CI invokes
+      it) crashed with `ModuleNotFoundError: No module named
+      'git_integration'` - the script's own directory was on `sys.path`,
+      but not the project root, so sibling packages weren't importable.
+      `test_ci_gate.py`'s own tests didn't catch this, since they import
+      `ci_enforcement.gate` as a module from the project root, which
+      doesn't hit the same path issue. Fixed the same way
+      `claude_code_hooks/hook_handler.py` was fixed earlier in this
+      project: `sys.path.insert(0, ...)` at the top of the script.
+- [x] **Tested against real commits, all three outcomes**
+      (`test_ci_gate.py`): a commit with a real valid attestation
+      (`VALID`), a commit with none (`MISSING`), and a commit whose
+      attestation was tampered with on disk after signing (`INVALID`,
+      correctly caught) - plus confirming `run_gate()`'s exit codes
+      (`0`/`1`) behave exactly as a CI system would need. Also manually
+      re-confirmed via the actual command line, invoked the same way CI
+      does (`python ci_enforcement/gate.py --head HEAD`), both before and
+      after the sys.path fix.
+- [x] **CONFIRMED WORKING on a real GitHub Actions runner (2026-08-28) -
+      fail case.** Pushed a commit with no attestation, the workflow ran
+      on an actual `ubuntu-latest` runner, `git fetch origin
+      'refs/notes/*:refs/notes/*'` worked, Python setup and dependency
+      install succeeded, and the gate correctly reported `MISSING` and
+      failed the job (`Process completed with exit code 1`) - exactly
+      correct behavior for a commit with no attestation.
+
+### Real bugs found trying to confirm the PASS case live - fixed properly, not patched
+
+Getting a real `VALID` result on GitHub Actions turned out to need two
+more fixes, both found through live debugging, not local testing:
+
+**Bug 1 - absolute paths don't survive a different machine.** The git
+note stored an absolute Windows path
+(`D:\code pfe 2\agentguard\.agentguard\attestations\...`) to the
+attestation file - meaningless the instant it's read on a Linux CI
+runner. First fix: store a path relative to the repo root instead.
+
+**Bug 2 - a relative path still isn't enough, for a deeper reason.**
+Even after Bug 1's fix, CI still reported `MISSING`. Root cause: `.agentguard/`
+is commonly gitignored (it's local/ephemeral state), so the referenced
+attestation file was never actually pushed to the remote at all - the
+note existed, but pointed at nothing CI could see. And even force-adding
+it wouldn't fully solve this: the attestation file for commit N typically
+gets committed in a LATER commit N+1, but CI checks whichever commit
+actually triggered it (often N+1) - which has no note of its own. The
+note is correctly on N; the file needs to exist in N+1's tree; a
+single-commit gate check never lines the two up cleanly.
+
+**The real fix - make the note fully self-contained.** Instead of storing
+a path reference, `attach_attestation_note()` now embeds the ENTIRE
+attestation, its signature, and the public key needed to verify it,
+directly in the note text (`git_integration/notes.py`,
+`signing/signer.py::verify_embedded_entry`). Once
+`git fetch refs/notes/*` has run, verification needs nothing else from
+the checkout at all - no external file, no gitignore interaction, no
+commit-ordering dependency. This eliminates the entire class of problem,
+not just today's symptom.
+
+**Proven, not assumed**: `test_ci_gate.py::test_self_contained_survives_different_machine`
+copies ONLY the `.git` directory (deliberately, NOT `.agentguard/`) to a
+fresh location and confirms verification still succeeds - reproducing the
+exact real-world condition (gitignored local state, fresh checkout) that
+broke the old design. All tests were rewritten to go through the actual
+`agentguard.auto_capture("git")` code path rather than reimplementing the
+sign+embed logic separately, since the whole point of this fix was found
+by testing the real production path, not isolated building blocks.
+
+**Still pending**: reconfirming the PASS case on a real GitHub Actions
+run with this fixed code - the fail case above was confirmed before this
+redesign; do the same push-and-watch confirmation again now that the
+self-containment fix is in place.
+
+## Next: Sprint 6, Day 2+ / Sprint 7
+
+- Reconfirm the PASS case on real GitHub Actions with the self-contained
+  note design (see above) - `git push && git push origin refs/notes/agentguard`,
+  then watch the Actions run.
+- Day 1 only checks the single triggering commit
+  (`github.sha`); extending to a full PR diff range needs resolving
+  `base`/`head` differently across `push` vs `pull_request` events -
+  `ci_enforcement/gate.py`'s `--base`/`--head` args already support this,
+  just not wired into the workflow YAML yet.
 - Sprint 5 remaining scope: a fuller in-toto **layout** (not just
   per-commit Statements) would tie multiple attestations together into a
-  supply-chain-wide provenance graph - out of scope for now, Day 1+2
-  cover per-commit attestation binding, which is the more immediately
-  useful piece.
-- Key rotation / multi-key trust for the local-key signing path
-  (currently: one keypair, generated once, used for everything - fine
-  for a solo dev prototype, not a real multi-contributor deployment).
+  supply-chain-wide provenance graph.
+- Key rotation / multi-key trust for the local-key signing path.
 - Remaining honest gap from Sprint 3: confirming Claude Code's tool-call
-  output pairing against a real live session - the one standing
-  "unconfirmed" flag, since Claude Code has never been live-tested in
-  this project the way Copilot has (hooks, OTel, Sigstore keyless
-  signing).
+  output pairing against a real live session.
 - `retrieved_context` in the attestation schema still uses a naming
   heuristic (Sprint 3 Day 3), not a confirmed semantic signal.
-- Sprint 6 per the original plan: CI/CD Enforcement.
+- Sprint 7 per the original plan: Dashboard & Visualization.
 
 ## Design notes worth remembering
 

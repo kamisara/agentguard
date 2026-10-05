@@ -177,14 +177,35 @@ def auto_capture(source: str):
         commit_hash = attestation.metadata.get("commit_hash")
         if commit_hash:
             from git_integration.notes import attach_attestation_note
+            from signing.keys import get_or_create_keypair, public_key_to_pem_string, load_public_key
+            import json as _json
             try:
-                attach_attestation_note(commit_hash, attestation.attestation_id, out_path)
-                print(f"  git note attached -> commit {commit_hash[:12]}")
+                # SPRINT 6 SELF-CONTAINMENT FIX - found via real live CI
+                # testing, not caught by local tests: a note that only
+                # stored a path to an external attestation file broke in
+                # practice for two independent reasons - .agentguard/ is
+                # commonly gitignored (the referenced file never actually
+                # reaches the remote), and even if force-committed, that
+                # file typically lands in a LATER commit than the one the
+                # note is attached to, so a single-commit CI gate check
+                # never lines the two up. Fix: embed the full attestation,
+                # its signature, and the public key needed to verify it,
+                # directly in the note. Zero external file dependency at
+                # verify time - see git_integration/notes.py's module
+                # docstring for the full writeup.
+                sig_data = _json.loads(Path(sig_path).read_text())
+                signature_b64 = sig_data["signature"]
+                _, public_key_path = get_or_create_keypair()
+                public_key_pem = public_key_to_pem_string(load_public_key(public_key_path))
+
+                attach_attestation_note(
+                    commit_hash, attestation.to_dict(), signature_b64, public_key_pem
+                )
+                print(f"  git note attached (self-contained) -> commit {commit_hash[:12]}")
             except RuntimeError as e:
                 print(f"  ⚠ could not attach git note: {e}")
 
             from git_integration.in_toto import write_intoto_attestation
-            from signing.keys import get_or_create_keypair
             try:
                 private_key_path, _ = get_or_create_keypair()
                 intoto_path = write_intoto_attestation(
@@ -348,10 +369,13 @@ def verify_keyless(attestation_id: str, expected_identity: str):
 
 
 def git_note_show(commit_hash: str):
-    """Sprint 5: shows every attestation attached to a given commit via
+    """Sprint 5/6: shows every attestation attached to a given commit via
     git notes. Real lookup, not a guess - reads the actual
-    refs/notes/agentguard ref."""
+    refs/notes/agentguard ref. Entries are now self-contained (Sprint 6
+    fix) - verifies inline using only what's embedded in the note, no
+    external file needed."""
     from git_integration.notes import get_attestations_for_commit
+    from signing.signer import verify_embedded_entry
 
     entries = get_attestations_for_commit(commit_hash)
     if not entries:
@@ -361,7 +385,10 @@ def git_note_show(commit_hash: str):
 
     print(f"Commit {commit_hash} has {len(entries)} attached attestation(s):")
     for entry in entries:
-        print(f"  {entry.get('attestation_id')}  ->  {entry.get('attestation_path')}")
+        result = verify_embedded_entry(entry)
+        status = "✔" if result["valid"] else "✘"
+        intent = entry.get("attestation", {}).get("developer_intent", "")[:60]
+        print(f"  {status} {entry.get('attestation_id')}  intent=\"{intent}\"  ({result['reason']})")
 
 
 def show_intoto(attestation_id: str):

@@ -1,0 +1,36 @@
+{
+  "schema_version": "sprint3-v1",
+  "attestation_id": "fc443430-aa34-43d0-82fb-d83b100f93f4",
+  "session_id": null,
+  "timestamp": "2026-08-28T10:38:26.068972+00:00",
+  "adapter": "git",
+  "developer_intent": "sprint 6 day 1: CI/CD enforcement gate",
+  "intent_source": "inferred",
+  "prompt": "sprint 6 day 1: CI/CD enforcement gate",
+  "ai_output_summary": "70 file(s) changed, +6846/-0",
+  "prompt_lineage": [
+    {
+      "role": "user",
+      "content": "sprint 6 day 1: CI/CD enforcement gate"
+    }
+  ],
+  "agent_identity": {
+    "model": null,
+    "adapter": "git"
+  },
+  "execution_environment": {
+    "session_id": null,
+    "event_timestamp": "2026-08-28T10:38:21+00:00"
+  },
+  "tool_invocations": [],
+  "retrieved_context": [],
+  "human_review_status": {
+    "reviewed": false,
+    "reviewer": null
+  },
+  "policy_compliance_flags": [],
+  "metadata": {
+    "commit_hash": "940591fc94a9a0af26a4681777af408b9ce661ec",
+    "diff_stat": "70 files changed, 6846 insertions(+)"
+  }
+}

@@ -28,7 +28,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PublicKey,
 )
 
-from .keys import load_private_key, load_public_key
+from .keys import load_private_key, load_public_key, public_key_from_pem_string
 
 
 def canonicalize(attestation_dict: dict) -> bytes:
@@ -156,3 +156,24 @@ def verify_signature_file(
         "algorithm": sig_data.get("algorithm"),
         "public_key_path": str(key_path),
     }
+
+
+def verify_embedded_entry(entry: dict) -> dict:
+    """Sprint 6 self-containment fix. Verifies a git-note entry
+    ({"attestation": {...}, "signature": "...", "public_key_pem": "..."})
+    with ZERO dependency on any external file - everything needed is
+    already inside the note itself. This is what makes CI verification
+    robust regardless of .gitignore rules, checkout timing, or which
+    commit happened to trigger the run - see git_integration/notes.py's
+    module docstring for the real failure this replaced."""
+    try:
+        public_key = public_key_from_pem_string(entry["public_key_pem"])
+        valid = verify_attestation_dict(entry["attestation"], entry["signature"], public_key)
+        return {
+            "valid": valid,
+            "reason": "signature valid" if valid else "signature does NOT match content (tampered or wrong key)",
+        }
+    except KeyError as e:
+        return {"valid": False, "reason": f"malformed note entry, missing key: {e}"}
+    except Exception as e:
+        return {"valid": False, "reason": f"{type(e).__name__}: {e}"}
