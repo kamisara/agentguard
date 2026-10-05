@@ -1,4 +1,4 @@
-#testnumber99
+#testestlolo
 # agentguard — capture layer, Sprint 2B
 
 ## Status
@@ -170,7 +170,7 @@ python test_signing.py                # Sprint 4 Day 1: local-key signing, tampe
 python test_sigstore_keyless.py       # Sprint 4 Day 2: Sigstore keyless module - imports/naming/error-handling only, see docstring
 python test_git_notes.py              # Sprint 5 Day 1: git notes, against this repo's real commits
 python test_intoto_dsse.py            # Sprint 5 Day 2: real in-toto Statement + DSSE, PAE signing, tamper detection
-python test_ci_gate.py                # Sprint 6 Day 1: CI gate against real commits - VALID/MISSING/INVALID, exit codes
+python test_ci_gate.py                # Sprint 6: CI gate, self-contained notes - VALID/MISSING/INVALID, cross-machine proof
 ```
 
 ## Using the active-adapter gate
@@ -663,21 +663,65 @@ Sprint 8 scope, not faked here.
       re-confirmed via the actual command line, invoked the same way CI
       does (`python ci_enforcement/gate.py --head HEAD`), both before and
       after the sys.path fix.
-- [x] **CONFIRMED WORKING on a real GitHub Actions runner (2026-08-28).**
-      The gap flagged above as untestable in this sandbox got closed for
-      real: pushed a commit with no attestation, the workflow ran on an
-      actual `ubuntu-latest` runner, `git fetch origin
+- [x] **CONFIRMED WORKING on a real GitHub Actions runner (2026-08-28) -
+      fail case.** Pushed a commit with no attestation, the workflow ran
+      on an actual `ubuntu-latest` runner, `git fetch origin
       'refs/notes/*:refs/notes/*'` worked, Python setup and dependency
       install succeeded, and the gate correctly reported `MISSING` and
       failed the job (`Process completed with exit code 1`) - exactly
-      correct behavior for a commit with no attestation. Confirmed the
-      passing case too: ran `auto-capture git` locally, pushed again, the
-      same workflow reported `VALID` / `GATE PASSED`. Both the gate
-      *logic* (tested locally, above) and the *YAML/runner integration*
-      (tested live, here) are now confirmed, not just designed-and-hoped.
+      correct behavior for a commit with no attestation.
+
+### Real bugs found trying to confirm the PASS case live - fixed properly, not patched
+
+Getting a real `VALID` result on GitHub Actions turned out to need two
+more fixes, both found through live debugging, not local testing:
+
+**Bug 1 - absolute paths don't survive a different machine.** The git
+note stored an absolute Windows path
+(`D:\code pfe 2\agentguard\.agentguard\attestations\...`) to the
+attestation file - meaningless the instant it's read on a Linux CI
+runner. First fix: store a path relative to the repo root instead.
+
+**Bug 2 - a relative path still isn't enough, for a deeper reason.**
+Even after Bug 1's fix, CI still reported `MISSING`. Root cause: `.agentguard/`
+is commonly gitignored (it's local/ephemeral state), so the referenced
+attestation file was never actually pushed to the remote at all - the
+note existed, but pointed at nothing CI could see. And even force-adding
+it wouldn't fully solve this: the attestation file for commit N typically
+gets committed in a LATER commit N+1, but CI checks whichever commit
+actually triggered it (often N+1) - which has no note of its own. The
+note is correctly on N; the file needs to exist in N+1's tree; a
+single-commit gate check never lines the two up cleanly.
+
+**The real fix - make the note fully self-contained.** Instead of storing
+a path reference, `attach_attestation_note()` now embeds the ENTIRE
+attestation, its signature, and the public key needed to verify it,
+directly in the note text (`git_integration/notes.py`,
+`signing/signer.py::verify_embedded_entry`). Once
+`git fetch refs/notes/*` has run, verification needs nothing else from
+the checkout at all - no external file, no gitignore interaction, no
+commit-ordering dependency. This eliminates the entire class of problem,
+not just today's symptom.
+
+**Proven, not assumed**: `test_ci_gate.py::test_self_contained_survives_different_machine`
+copies ONLY the `.git` directory (deliberately, NOT `.agentguard/`) to a
+fresh location and confirms verification still succeeds - reproducing the
+exact real-world condition (gitignored local state, fresh checkout) that
+broke the old design. All tests were rewritten to go through the actual
+`agentguard.auto_capture("git")` code path rather than reimplementing the
+sign+embed logic separately, since the whole point of this fix was found
+by testing the real production path, not isolated building blocks.
+
+**Still pending**: reconfirming the PASS case on a real GitHub Actions
+run with this fixed code - the fail case above was confirmed before this
+redesign; do the same push-and-watch confirmation again now that the
+self-containment fix is in place.
 
 ## Next: Sprint 6, Day 2+ / Sprint 7
 
+- Reconfirm the PASS case on real GitHub Actions with the self-contained
+  note design (see above) - `git push && git push origin refs/notes/agentguard`,
+  then watch the Actions run.
 - Day 1 only checks the single triggering commit
   (`github.sha`); extending to a full PR diff range needs resolving
   `base`/`head` differently across `push` vs `pull_request` events -

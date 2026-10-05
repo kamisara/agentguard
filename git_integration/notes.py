@@ -19,6 +19,28 @@ before a single commit) - `git notes append` is used, not `git notes add`
 (which would overwrite), and each attestation reference is stored as one
 JSON line so multiple entries stay parseable rather than colliding into
 unstructured text.
+
+SPRINT 6 SELF-CONTAINMENT FIX, found via real live CI testing (2026-09):
+the original design stored only {"attestation_id", "attestation_path"} -
+a reference to an external file - in the note. This broke in practice for
+reasons that only showed up on a real GitHub Actions run, not in local
+testing:
+
+  1. .agentguard/ is commonly gitignored (local/ephemeral state), so the
+     referenced attestation file was never actually pushed to the
+     remote - the note existed, but pointed at nothing CI could see.
+  2. Even if force-committed, the attestation file for commit N typically
+     gets added in a LATER commit N+1 (you attest N, then commit the
+     attestation file itself) - but CI checks whatever commit actually
+     triggered it (often N+1), which has no note of its own. The note is
+     correctly on N; the file ends up needing to exist in N+1's tree;
+     the two never line up cleanly under a single-commit gate check.
+
+Both problems disappear if the note is fully SELF-CONTAINED: the full
+attestation dict, its signature, and the public key needed to verify it,
+all embedded directly in the note text. Once `git fetch refs/notes/*`
+has run, verification needs nothing else from the checkout at all - no
+external file, no gitignore interaction, no commit-ordering dependency.
 """
 
 import json
@@ -44,19 +66,24 @@ def _run_git(args: list, repo_path: Union[str, Path, None] = None) -> str:
 
 def attach_attestation_note(
     commit_hash: str,
-    attestation_id: str,
-    attestation_path: Union[str, Path],
+    attestation_dict: dict,
+    signature_b64: str,
+    public_key_pem: str,
     repo_path: Union[str, Path, None] = None,
 ) -> None:
-    """Appends a reference to this attestation onto the given commit's
-    agentguard note. Idempotent in intent (appending the same reference
-    twice would duplicate it - callers should check
+    """Appends a FULLY SELF-CONTAINED attestation record onto the given
+    commit's agentguard note - the attestation content, its signature,
+    and the public key to verify it, all embedded directly. No external
+    file dependency at read time. Idempotent in intent (appending the
+    same reference twice would duplicate it - callers should check
     get_attestations_for_commit() first if that matters for their use
     case; not enforced here since "attach again" is a legitimate action
     if genuinely re-signing or re-attesting the same commit)."""
     note_line = json.dumps({
-        "attestation_id": attestation_id,
-        "attestation_path": str(attestation_path),
+        "attestation_id": attestation_dict.get("attestation_id"),
+        "attestation": attestation_dict,
+        "signature": signature_b64,
+        "public_key_pem": public_key_pem,
     })
     _run_git(
         ["notes", f"--ref={NOTES_REF}", "append", "-m", note_line, commit_hash],
@@ -67,10 +94,11 @@ def attach_attestation_note(
 def get_attestations_for_commit(
     commit_hash: str, repo_path: Union[str, Path, None] = None
 ) -> List[dict]:
-    """Returns the list of {attestation_id, attestation_path} dicts
-    attached to this commit. Returns [] if the commit has no agentguard
-    note at all - this is the normal case for any commit not made
-    through AgentGuard's capture flow, not an error."""
+    """Returns the list of self-contained entries
+    ({attestation_id, attestation, signature, public_key_pem}) attached
+    to this commit. Returns [] if the commit has no agentguard note at
+    all - this is the normal case for any commit not made through
+    AgentGuard's capture flow, not an error."""
     try:
         raw = _run_git(
             ["notes", f"--ref={NOTES_REF}", "show", commit_hash], repo_path

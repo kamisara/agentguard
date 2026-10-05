@@ -87,3 +87,17 @@ def load_private_key(path: Union[str, Path]) -> Ed25519PrivateKey:
 
 def load_public_key(path: Union[str, Path]) -> Ed25519PublicKey:
     return serialization.load_pem_public_key(Path(path).read_bytes())
+
+
+def public_key_to_pem_string(public_key: Ed25519PublicKey) -> str:
+    """For embedding a public key directly in a git note (Sprint 6
+    self-containment fix) - avoids any dependency on a key FILE existing
+    in whatever checkout is doing the verifying."""
+    return public_key.public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    ).decode("ascii")
+
+
+def public_key_from_pem_string(pem_string: str) -> Ed25519PublicKey:
+    return serialization.load_pem_public_key(pem_string.encode("ascii"))

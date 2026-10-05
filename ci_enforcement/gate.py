@@ -36,8 +36,7 @@ from typing import List, Union
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from git_integration.notes import get_attestations_for_commit
-from signing.signer import verify_signature_file
-from git_integration.in_toto import verify_intoto_attestation
+from signing.signer import verify_embedded_entry
 
 
 def _run_git(args: list, repo_path: Union[str, Path, None] = None) -> str:
@@ -68,31 +67,27 @@ def commits_in_range(
 def check_commit(commit_hash: str, repo_path: Union[str, Path, None] = None) -> dict:
     """Returns a result dict for one commit: whether it has attestations
     attached, and whether every attached one passes signature
-    verification. Checks BOTH signing methods present on an attestation -
-    the local-key .sig (always expected, since auto-capture signs by
-    default) and the in-toto/DSSE envelope (also written automatically
-    for git-sourced attestations, Sprint 5 Day 2) - a commit is only
-    reported VALID if all attached attestations pass local-key
-    verification; in-toto verification is checked and reported but
-    doesn't currently gate on its own (see docstring note on scope)."""
+    verification. SPRINT 6 FIX: verification is now fully self-contained
+    (verify_embedded_entry) - the git note itself carries the attestation
+    content, signature, and public key, with zero dependency on any
+    external file existing in the checkout. This replaced an earlier
+    design that stored only a path reference, which broke in real CI
+    testing (gitignored files, commit-ordering mismatches - see
+    git_integration/notes.py's module docstring for the full story)."""
     entries = get_attestations_for_commit(commit_hash, repo_path)
     if not entries:
         return {"commit": commit_hash, "status": "MISSING", "attestations": []}
 
     results = []
     for entry in entries:
-        attestation_path = Path(entry["attestation_path"])
-        sig_result = verify_signature_file(attestation_path)
-        intoto_result = verify_intoto_attestation(attestation_path)
+        verify_result = verify_embedded_entry(entry)
         results.append({
             "attestation_id": entry.get("attestation_id"),
-            "local_key_valid": sig_result["valid"],
-            "local_key_reason": sig_result["reason"],
-            "intoto_valid": intoto_result["valid"],
-            "intoto_reason": intoto_result["reason"],
+            "valid": verify_result["valid"],
+            "reason": verify_result["reason"],
         })
 
-    all_valid = all(r["local_key_valid"] for r in results)
+    all_valid = all(r["valid"] for r in results)
     status = "VALID" if all_valid else "INVALID"
     return {"commit": commit_hash, "status": status, "attestations": results}
 
@@ -126,8 +121,8 @@ def run_gate(
         elif result["status"] == "INVALID":
             print(f"✘ {short}  INVALID - attached attestation failed verification")
             for a in result["attestations"]:
-                if not a["local_key_valid"]:
-                    print(f"    {a['attestation_id']}: {a['local_key_reason']}")
+                if not a["valid"]:
+                    print(f"    {a['attestation_id']}: {a['reason']}")
             failed = True
         else:
             print(f"✔ {short}  VALID - {len(result['attestations'])} attestation(s) verified")

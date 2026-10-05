@@ -1,32 +1,43 @@
 """
-Sprint 6, Day 1 validation script - CI/CD Enforcement gate.
+Sprint 6, Day 1 (updated Day 2: self-contained notes) validation script -
+CI/CD Enforcement gate.
 
 Tests against REAL commits in this repo, not mocks:
-  1. A commit with a valid, signed, attached attestation -> VALID.
+  1. A commit with a valid, signed, self-contained attestation -> VALID.
   2. A commit with no attestation at all -> MISSING (the normal case for
      any commit not made through AgentGuard).
-  3. A commit whose attached attestation file was tampered with on disk
-     AFTER signing -> INVALID (same tamper-detection discipline as
-     test_signing.py and test_intoto_dsse.py - the gate's whole purpose
-     is catching exactly this).
+  3. A commit whose embedded attestation was tampered with -> INVALID
+     (same tamper-detection discipline as test_signing.py and
+     test_intoto_dsse.py - the gate's whole purpose is catching exactly
+     this).
   4. run_gate()'s exit code is 0 only when every commit passes, nonzero
      otherwise - this is the literal mechanism a real CI system uses to
-     fail the job, so it's not just an implementation detail to get right.
+     fail the job.
+  5. The actual real-world scenario a live GitHub Actions run exposed:
+     copying the whole repo to a completely different machine/path and
+     confirming verification still succeeds - since embedded notes have
+     zero external file dependency, this should now always work,
+     regardless of .gitignore rules or which commit added which file.
+
+All tests go through the REAL agentguard.auto_capture("git") code path
+rather than reimplementing the sign+embed logic separately - this is
+deliberate: the whole point of Sprint 6's self-containment fix was found
+by testing the actual production path on a real CI runner, not by testing
+building blocks in isolation. Reusing that exact path here keeps these
+tests honest about what they're actually proving.
 
 Run from inside the project root:
     python test_ci_gate.py
 """
 
 import json
+import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 from ci_enforcement.gate import check_commit, run_gate, commits_in_range
-from git_integration.notes import attach_attestation_note, NOTES_REF
-from capture.git_adapter import GitAdapter
-from capture.normalizer import normalize
-from attestation.generator import generate_attestation
-from attestation.store import write_and_sign_attestation
+from git_integration.notes import get_attestations_for_commit, NOTES_REF
 
 
 def _cleanup_notes_ref(repo_path=None):
@@ -37,69 +48,25 @@ def _cleanup_notes_ref(repo_path=None):
     )
 
 
-def test_relative_path_survives_different_machine():
-    print("=== Real bug found via live GitHub Actions testing: absolute paths ===")
-    print("=== in git notes don't survive a different machine/OS - fixed to  ===")
-    print("=== store relative paths, proven here by copying to a new location ===")
-    _cleanup_notes_ref()
-
-    adapter = GitAdapter()
-    event = adapter.capture()
-    normalized = normalize(event)
-    attestation = generate_attestation(normalized)
-    attestation_path, _ = write_and_sign_attestation(attestation)
-    commit_hash = _current_commit()
-
-    # This is what agentguard.py's auto_capture() now does - store a
-    # RELATIVE, posix-normalized path, not attestation_path's absolute form.
-    relative_path = Path(attestation_path).resolve().relative_to(Path.cwd().resolve())
-    note_path = relative_path.as_posix()
-    attach_attestation_note(commit_hash, attestation.attestation_id, note_path)
-
-    # Simulate a genuinely different machine: copy the whole repo
-    # (including .git, .agentguard/, and the notes ref) to a different
-    # absolute path and check the gate from there instead - this is
-    # exactly what a GitHub Actions runner is, from the repo's
-    # perspective: a fresh checkout at a path that has nothing to do
-    # with wherever the attestation was originally generated.
-    import shutil
-    import tempfile
-    sim_path = Path(tempfile.gettempdir()) / "agentguard_ci_gate_portability_test"
-    if sim_path.exists():
-        shutil.rmtree(sim_path)
-    shutil.copytree(Path.cwd(), sim_path)
-
-    result = check_commit(commit_hash, repo_path=sim_path)
-    assert result["status"] == "VALID", (
-        f"expected VALID from the copied location, got: {result}"
-    )
-    print(f"Signed at: {Path.cwd()}")
-    print(f"Verified from: {sim_path}")
-    print(f"Result: {result['status']}")
-
-    shutil.rmtree(sim_path)
-    print("PASS\n")
-
-
 def _current_commit() -> str:
-    result = subprocess.run(
-        ["git", "rev-parse", "HEAD"], capture_output=True, text=True
-    )
+    result = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True)
     return result.stdout.strip()
 
 
+def _attest_current_commit():
+    """Runs the REAL auto_capture('git') path - same code agentguard.py's
+    CLI uses - so these tests exercise exactly what a real user/CI
+    invocation does, not a parallel reimplementation."""
+    import agentguard
+    agentguard.auto_capture("git")
+
+
 def test_valid_commit():
-    print("=== Commit with a real, valid, attached attestation -> VALID ===")
+    print("=== Commit with a real, valid, self-contained attestation -> VALID ===")
     _cleanup_notes_ref()
 
-    adapter = GitAdapter()
-    event = adapter.capture()
-    normalized = normalize(event)
-    attestation = generate_attestation(normalized)
-    attestation_path, _ = write_and_sign_attestation(attestation)
-
+    _attest_current_commit()
     commit_hash = _current_commit()
-    attach_attestation_note(commit_hash, attestation.attestation_id, attestation_path)
 
     result = check_commit(commit_hash)
     assert result["status"] == "VALID", result
@@ -119,51 +86,50 @@ def test_missing_commit():
 
 
 def test_tampered_attestation():
-    print("=== Commit with a TAMPERED attached attestation -> INVALID ===")
+    print("=== Commit with a TAMPERED embedded attestation -> INVALID ===")
     _cleanup_notes_ref()
 
-    adapter = GitAdapter()
-    event = adapter.capture()
-    normalized = normalize(event)
-    attestation = generate_attestation(normalized)
-    attestation_path, _ = write_and_sign_attestation(attestation)
-
+    _attest_current_commit()
     commit_hash = _current_commit()
-    attach_attestation_note(commit_hash, attestation.attestation_id, attestation_path)
 
-    # Tamper with the attestation file on disk, same as the real
-    # tampering scenario tested in test_signing.py - this is exactly
-    # the case the gate exists to catch.
-    data = json.loads(Path(attestation_path).read_text())
-    data["developer_intent"] = "TAMPERED - this should be caught by the gate"
-    Path(attestation_path).write_text(json.dumps(data))
+    # Tamper with the note content directly - simulates someone editing
+    # the embedded attestation after the fact. Since everything needed to
+    # verify lives in the note now, tampering means rewriting the note
+    # itself, not an external file.
+    entries = get_attestations_for_commit(commit_hash)
+    assert len(entries) == 1
+    tampered_entry = dict(entries[0])
+    tampered_entry["attestation"] = dict(tampered_entry["attestation"])
+    tampered_entry["attestation"]["developer_intent"] = "TAMPERED - should be caught"
+
+    subprocess.run(
+        ["git", "notes", f"--ref={NOTES_REF}", "remove", commit_hash],
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "notes", f"--ref={NOTES_REF}", "add", "-m", json.dumps(tampered_entry), commit_hash],
+        capture_output=True,
+    )
 
     result = check_commit(commit_hash)
     assert result["status"] == "INVALID", result
     print(f"Commit {commit_hash[:12]}: {result['status']} (tampering correctly caught)")
     for a in result["attestations"]:
-        print(f"  {a['attestation_id']}: {a['local_key_reason']}")
+        print(f"  {a['attestation_id']}: {a['reason']}")
     print("PASS\n")
 
 
 def test_gate_exit_codes():
     print("=== run_gate() exit codes match CI expectations ===")
 
-    # Passing case: valid attestation attached.
     _cleanup_notes_ref()
-    adapter = GitAdapter()
-    event = adapter.capture()
-    normalized = normalize(event)
-    attestation = generate_attestation(normalized)
-    attestation_path, _ = write_and_sign_attestation(attestation)
+    _attest_current_commit()
     commit_hash = _current_commit()
-    attach_attestation_note(commit_hash, attestation.attestation_id, attestation_path)
 
     exit_code_pass = run_gate(head=commit_hash)
     assert exit_code_pass == 0, f"expected 0 (pass), got {exit_code_pass}"
     print(f"Valid commit: exit code {exit_code_pass} (0 = CI passes)")
 
-    # Failing case: no attestation attached.
     _cleanup_notes_ref()
     exit_code_fail = run_gate(head=commit_hash)
     assert exit_code_fail != 0, f"expected nonzero (fail), got {exit_code_fail}"
@@ -171,22 +137,50 @@ def test_gate_exit_codes():
     print("PASS\n")
 
 
+def test_self_contained_survives_different_machine():
+    print("=== SPRINT 6 FIX, the real one: self-contained notes need ===")
+    print("=== NOTHING but the note itself - proven across machines  ===")
+    _cleanup_notes_ref()
+
+    _attest_current_commit()
+    commit_hash = _current_commit()
+
+    # Simulate a genuinely different machine/CI runner: copy ONLY the
+    # .git directory (which carries the notes ref) to a new location -
+    # deliberately NOT copying .agentguard/, since that's exactly the
+    # real-world gitignore situation that broke the old path-based
+    # design. If self-containment actually works, verification should
+    # succeed anyway, since nothing outside .git is needed anymore.
+    sim_path = Path(tempfile.gettempdir()) / "agentguard_self_contained_test"
+    if sim_path.exists():
+        shutil.rmtree(sim_path)
+    sim_path.mkdir(parents=True)
+    shutil.copytree(Path.cwd() / ".git", sim_path / ".git")
+
+    result = check_commit(commit_hash, repo_path=sim_path)
+    assert result["status"] == "VALID", (
+        f"expected VALID with ONLY .git copied (no .agentguard/ at all) - "
+        f"got: {result}"
+    )
+    print(f"Verified from a location with ONLY .git present (no .agentguard/ directory)")
+    print(f"Result: {result['status']}")
+
+    shutil.rmtree(sim_path)
+    print("PASS\n")
+
+
 def test_range_check_multiple_commits():
     print("=== commits_in_range() resolves a real range correctly ===")
     _cleanup_notes_ref()
 
-    # Don't assume the repo already has 2+ commits (a fresh/shallow repo
-    # might only have one, in which case HEAD~1 doesn't exist at all -
-    # the same "first commit has no parent" edge case GitAdapter already
-    # handles elsewhere). Make a real second commit here so the range is
-    # guaranteed to resolve regardless of the repo's prior state.
+    # Don't assume the repo already has 2+ commits - make a real second
+    # commit here so the range is guaranteed to resolve regardless of the
+    # repo's prior state (same "first commit has no parent" consideration
+    # GitAdapter already handles elsewhere).
     test_file = Path("ci_gate_range_test.tmp")
     test_file.write_text("range test")
     subprocess.run(["git", "add", str(test_file)], capture_output=True)
-    subprocess.run(
-        ["git", "commit", "-q", "-m", "test commit for range check"],
-        capture_output=True,
-    )
+    subprocess.run(["git", "commit", "-q", "-m", "test commit for range check"], capture_output=True)
 
     head = _current_commit()
     commits = commits_in_range("HEAD~1", "HEAD")
@@ -195,10 +189,7 @@ def test_range_check_multiple_commits():
 
     test_file.unlink()
     subprocess.run(["git", "add", "-A"], capture_output=True)
-    subprocess.run(
-        ["git", "commit", "-q", "-m", "clean up range test file"],
-        capture_output=True,
-    )
+    subprocess.run(["git", "commit", "-q", "-m", "clean up range test file"], capture_output=True)
     print("PASS\n")
 
 
@@ -207,7 +198,7 @@ if __name__ == "__main__":
     test_missing_commit()
     test_tampered_attestation()
     test_gate_exit_codes()
-    test_relative_path_survives_different_machine()
+    test_self_contained_survives_different_machine()
     test_range_check_multiple_commits()
     _cleanup_notes_ref()
     print("CI gate tests passed.")
