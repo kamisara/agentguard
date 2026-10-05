@@ -1,16 +1,20 @@
 name: AgentGuard Attestation Gate
 
-# CONFIRMED WORKING on a real GitHub Actions runner (2026-08-28): both
-# the fail case (commit with no attestation -> MISSING, exit 1) and the
-# pass case (commit with a real signed attestation -> VALID, exit 0) were
-# observed on an actual ubuntu-latest run, not just designed against
-# documented behavior. See README.md's Sprint 6 section for the full
-# writeup.
+# Runs on pull requests only. Push to main is not gated, because a merge
+# commit made by GitHub never has an attestation note, so the gate would
+# fail on every merge.
+#
+# The gate checks pull_request.head.sha, the real last commit of the
+# branch. github.sha on a pull_request event is a temporary merge commit
+# that GitHub creates, which never has a note.
+#
+# Status: the fail case (no attestation -> MISSING, exit 1) was confirmed
+# on a real runner. The pass case with self-contained notes is still
+# being confirmed.
 
 on:
   pull_request:
-  push:
-    branches: [main]
+    types: [opened, synchronize, reopened]
 
 jobs:
   attestation-gate:
@@ -18,16 +22,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # full history - notes reference commits by hash, need them locally
+          fetch-depth: 0  # full history - notes reference commits by hash
 
-      # CRITICAL, confirmed via research before writing this (not assumed):
-      # git notes live under refs/notes/*, a ref namespace SEPARATE from
-      # branches and tags. actions/checkout does not fetch this namespace
-      # at all, regardless of fetch-depth. Without this step, the gate
-      # would see "MISSING" on every single commit even if real
-      # attestation notes exist on the remote - a false negative that
-      # defeats the entire point of the gate, not a fail-safe.
-      - name: Fetch git notes (not fetched by actions/checkout by default)
+      # git notes live under refs/notes/*, which actions/checkout never
+      # fetches, even with fetch-depth: 0. Without this step the gate
+      # reports MISSING on every commit.
+      - name: Fetch git notes
         run: git fetch origin 'refs/notes/*:refs/notes/*'
 
       - uses: actions/setup-python@v5
@@ -38,9 +38,4 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run AgentGuard attestation gate
-        # Day 1 scope: checks only the HEAD commit that triggered this
-        # workflow, not the full PR diff range - see ci_enforcement/gate.py
-        # for how to extend to a --base/--head range once PR-range
-        # resolution across push/pull_request event types is worth the
-        # added complexity.
-        run: python ci_enforcement/gate.py --head "${{ github.sha }}"
+        run: python ci_enforcement/gate.py --head "${{ github.event.pull_request.head.sha }}"
